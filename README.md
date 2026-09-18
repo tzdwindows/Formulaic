@@ -35,7 +35,17 @@
   - 隐函数 2D 方程：$f(x, y, t) = 0$（如圆、椭圆、卡西尼卵形线、双纽线）
   - 标量场二维热力图：$z = f(x, y, t)$
   - 隐式乘法智能识别：`2x`、`3(x+1)`、`x y`、`3sin(x)`
-  - 内置常数与丰富函数：`pi`、`e`、`tau`、`phi`，三角/反三角/双曲/指数/对数/截断/极值函数。
+- **支持的 55+ 种数学函数与常量完整清单**：
+  - **基础与三角函数**：`sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `atan2(y, x)`
+  - **余割/正割/余切及反函数**：`sec`, `csc`, `cot`, `asec`, `acsc`, `acot`
+  - **双曲与反双曲函数**：`sinh`, `cosh`, `tanh`, `sech`, `csch`, `coth`, `asinh` (`arsinh`), `acosh` (`arcosh`), `atanh` (`artanh`)
+  - **指数与对数族**：`exp`, `exp2`, `expm1`, `ln` (`log`), `log10`, `log2`, `log1p`, `pow(x, y)`
+  - **根号与取整截断**：`sqrt`, `cbrt`, `abs`, `floor`, `ceil`, `round`, `trunc`, `frac` (`fract`), `sign`, `copysign(x, y)`
+  - **高等特殊数学与统计函数**：`sinc(x)`, `erf(x)`, `erfc(x)`, `gamma(x)` (`tgamma`), `lgamma(x)`, `beta(a, b)`
+  - **图形学阶跃与插值函数**：`step(edge, x)`, `smoothstep(edge0, edge1, x)`, `lerp(a, b, t)` (`mix`), `clamp(x, min, max)`, `min(a, b)`, `max(a, b)`, `hypot(x, y)`
+  - **模运算与取余**：`fmod(x, y)` (`mod`), `remainder(x, y)` (`rem`)
+  - **信号脉冲与角度换算**：`heaviside(x)`, `rect(x)`, `tri(x)`, `deg2rad(x)` (`radians`), `rad2deg(x)` (`degrees`)
+  - **内置高精度常数**：`pi` / `PI`, `e` / `E`, `tau` / `TAU`, `phi` / `PHI`, `sqrt2` / `SQRT2`, `sqrt3` / `SQRT3`, `euler` / `EULER` ($\gamma \approx 0.577215$), `ln2` / `LN2`, `ln10` / `LN10`, `inf` / `INF`
 - **结构化诊断**：错误位置精确到行、列与字符偏移，杜绝静默失败或直接崩溃。
 
 ### 2. 多后端渲染与多格式导出 (Render Pipeline & Exporters)

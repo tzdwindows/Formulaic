@@ -43,23 +43,67 @@ enum class Opcode : uint8_t {
     SINH,
     COSH,
     TANH,
+    ASINH,
+    ACOSH,
+    ATANH,
+
+    // Reciprocal Trigonometric & Hyperbolic
+    SEC,
+    CSC,
+    COT,
+    ASEC,
+    ACSC,
+    ACOT,
+    SECH,
+    CSCH,
+    COTH,
+
+    // Special & Statistical Functions
+    SINC,
+    ERF,
+    ERFC,
+    TGAMMA,
+    LGAMMA,
+
+    // Exponential & Logarithmic Variants
     EXP,
+    EXP2,
+    EXPM1,
     LN,
     LOG10,
     LOG2,
+    LOG1P,
+
+    // Roots & Rounding
     SQRT,
     CBRT,
     ABS,
     FLOOR,
     CEIL,
     ROUND,
+    TRUNC,
+    FRACT,
     SIGN,
+
+    // Signal & Angle Transforms
+    HEAVISIDE,
+    RECT,
+    TRI,
+    DEG2RAD,
+    RAD2DEG,
 
     // Multi-Argument Functions
     ATAN2,          // 2 args: y, x
     MIN,            // 2 args
     MAX,            // 2 args
+    HYPOT,          // 2 args
+    COPYSIGN,       // 2 args
+    REMAINDER,      // 2 args
+    BETA,           // 2 args
+    STEP,           // 2 args: edge, x
     CLAMP,          // 3 args: x, min, max
+    SMOOTHSTEP,     // 3 args: edge0, edge1, x
+    LERP,           // 3 args: a, b, t
 
     RET
 };
@@ -110,21 +154,55 @@ struct FORMULAIC_API BytecodeProgram {
         case Opcode::SINH: return "SINH";
         case Opcode::COSH: return "COSH";
         case Opcode::TANH: return "TANH";
+        case Opcode::ASINH: return "ASINH";
+        case Opcode::ACOSH: return "ACOSH";
+        case Opcode::ATANH: return "ATANH";
+        case Opcode::SEC: return "SEC";
+        case Opcode::CSC: return "CSC";
+        case Opcode::COT: return "COT";
+        case Opcode::ASEC: return "ASEC";
+        case Opcode::ACSC: return "ACSC";
+        case Opcode::ACOT: return "ACOT";
+        case Opcode::SECH: return "SECH";
+        case Opcode::CSCH: return "CSCH";
+        case Opcode::COTH: return "COTH";
+        case Opcode::SINC: return "SINC";
+        case Opcode::ERF: return "ERF";
+        case Opcode::ERFC: return "ERFC";
+        case Opcode::TGAMMA: return "TGAMMA";
+        case Opcode::LGAMMA: return "LGAMMA";
         case Opcode::EXP: return "EXP";
+        case Opcode::EXP2: return "EXP2";
+        case Opcode::EXPM1: return "EXPM1";
         case Opcode::LN: return "LN";
         case Opcode::LOG10: return "LOG10";
         case Opcode::LOG2: return "LOG2";
+        case Opcode::LOG1P: return "LOG1P";
         case Opcode::SQRT: return "SQRT";
         case Opcode::CBRT: return "CBRT";
         case Opcode::ABS: return "ABS";
         case Opcode::FLOOR: return "FLOOR";
         case Opcode::CEIL: return "CEIL";
         case Opcode::ROUND: return "ROUND";
+        case Opcode::TRUNC: return "TRUNC";
+        case Opcode::FRACT: return "FRACT";
         case Opcode::SIGN: return "SIGN";
+        case Opcode::HEAVISIDE: return "HEAVISIDE";
+        case Opcode::RECT: return "RECT";
+        case Opcode::TRI: return "TRI";
+        case Opcode::DEG2RAD: return "DEG2RAD";
+        case Opcode::RAD2DEG: return "RAD2DEG";
         case Opcode::ATAN2: return "ATAN2";
         case Opcode::MIN: return "MIN";
         case Opcode::MAX: return "MAX";
+        case Opcode::HYPOT: return "HYPOT";
+        case Opcode::COPYSIGN: return "COPYSIGN";
+        case Opcode::REMAINDER: return "REMAINDER";
+        case Opcode::BETA: return "BETA";
+        case Opcode::STEP: return "STEP";
         case Opcode::CLAMP: return "CLAMP";
+        case Opcode::SMOOTHSTEP: return "SMOOTHSTEP";
+        case Opcode::LERP: return "LERP";
         case Opcode::RET: return "RET";
         default: return "UNKNOWN";
     }

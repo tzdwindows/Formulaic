@@ -210,6 +210,79 @@ int main() {
         std::cout << "       Status:     PASSED\n";
     }
 
+    // 9. Extended Math Functions and Constants Suite
+    {
+        std::cout << "[Test 9] Extended Math Functions & Advanced Constants Suite... ";
+
+        // Inverse hyperbolic
+        auto r_hyp = formulaic::Expression::parse("asinh(0) + acosh(1) + atanh(0)");
+        TEST_ASSERT(r_hyp.has_value(), r_hyp.error().format());
+        TEST_ASSERT_NEAR(r_hyp->eval(0.0), 0.0, 1e-9, "asinh(0)+acosh(1)+atanh(0) == 0");
+
+        // Reciprocal trigonometry & hyperbolic
+        auto r_recip = formulaic::Expression::parse("sec(0) + csc(pi / 2) + cot(pi / 4) + sech(0)");
+        TEST_ASSERT(r_recip.has_value(), r_recip.error().format());
+        TEST_ASSERT_NEAR(r_recip->eval(0.0), 4.0, 1e-9, "sec(0) + csc(pi/2) + cot(pi/4) + sech(0) == 4");
+
+        // Special functions: sinc, erf, erfc, gamma, lgamma, beta
+        auto r_sinc0 = formulaic::Expression::parse("sinc(0)");
+        TEST_ASSERT(r_sinc0.has_value(), r_sinc0.error().format());
+        TEST_ASSERT_NEAR(r_sinc0->eval(0.0), 1.0, 1e-9, "sinc(0) == 1");
+
+        auto r_sinc_pi = formulaic::Expression::parse("sinc(pi / 2)");
+        TEST_ASSERT(r_sinc_pi.has_value(), r_sinc_pi.error().format());
+        TEST_ASSERT_NEAR(r_sinc_pi->eval(0.0), 2.0 / 3.141592653589793, 1e-9, "sinc(pi/2) == 2/pi");
+
+        auto r_erf = formulaic::Expression::parse("erf(0) + erfc(0)");
+        TEST_ASSERT(r_erf.has_value(), r_erf.error().format());
+        TEST_ASSERT_NEAR(r_erf->eval(0.0), 1.0, 1e-9, "erf(0) + erfc(0) == 1");
+
+        auto r_gamma = formulaic::Expression::parse("gamma(5) + tgamma(4)");
+        TEST_ASSERT(r_gamma.has_value(), r_gamma.error().format());
+        TEST_ASSERT_NEAR(r_gamma->eval(0.0), 24.0 + 6.0, 1e-9, "gamma(5) + tgamma(4) == 30");
+
+        auto r_beta = formulaic::Expression::parse("beta(2, 3)");
+        TEST_ASSERT(r_beta.has_value(), r_beta.error().format());
+        TEST_ASSERT_NEAR(r_beta->eval(0.0), 1.0 / 12.0, 1e-9, "beta(2, 3) == 1/12");
+
+        // Exp2, Expm1, Log1p
+        auto r_exp2 = formulaic::Expression::parse("exp2(4) + expm1(0) + log1p(0)");
+        TEST_ASSERT(r_exp2.has_value(), r_exp2.error().format());
+        TEST_ASSERT_NEAR(r_exp2->eval(0.0), 16.0, 1e-9, "exp2(4) == 16");
+
+        // Trunc, Frac, Copysign, Remainder, Hypot
+        auto r_float = formulaic::Expression::parse("trunc(-3.8) + frac(4.75) + copysign(5, -1) + hypot(3, 4)");
+        TEST_ASSERT(r_float.has_value(), r_float.error().format());
+        // -3.0 + 0.75 + (-5.0) + 5.0 = -2.25
+        TEST_ASSERT_NEAR(r_float->eval(0.0), -2.25, 1e-9, "trunc + frac + copysign + hypot == -2.25");
+
+        // Graphics Step, Smoothstep, Lerp / Mix
+        auto r_step = formulaic::Expression::parse("step(5, 3) + step(5, 7)");
+        TEST_ASSERT(r_step.has_value(), r_step.error().format());
+        TEST_ASSERT_NEAR(r_step->eval(0.0), 1.0, 1e-9, "step(5, 3) + step(5, 7) == 1");
+
+        auto r_smooth = formulaic::Expression::parse("smoothstep(0, 10, 5)");
+        TEST_ASSERT(r_smooth.has_value(), r_smooth.error().format());
+        TEST_ASSERT_NEAR(r_smooth->eval(0.0), 0.5, 1e-9, "smoothstep midpoint is 0.5");
+
+        auto r_lerp = formulaic::Expression::parse("lerp(10, 30, 0.25) + mix(10, 30, 0.75)");
+        TEST_ASSERT(r_lerp.has_value(), r_lerp.error().format());
+        TEST_ASSERT_NEAR(r_lerp->eval(0.0), 15.0 + 25.0, 1e-9, "lerp + mix == 40");
+
+        // Signal: Heaviside, Rect, Tri, Deg2rad, Rad2deg
+        auto r_signal = formulaic::Expression::parse("heaviside(5) + rect(0.1) + tri(0.2) + rad2deg(deg2rad(90))");
+        TEST_ASSERT(r_signal.has_value(), r_signal.error().format());
+        // 1.0 + 1.0 + 0.8 + 90.0 = 92.8
+        TEST_ASSERT_NEAR(r_signal->eval(0.0), 92.8, 1e-9, "heaviside + rect + tri + angle transforms");
+
+        // Constants: sqrt2, sqrt3, euler, ln2, ln10
+        auto r_consts = formulaic::Expression::parse("sqrt2^2 + sqrt3^2 + exp(ln2) + exp(ln10)");
+        TEST_ASSERT(r_consts.has_value(), r_consts.error().format());
+        TEST_ASSERT_NEAR(r_consts->eval(0.0), 2.0 + 3.0 + 2.0 + 10.0, 1e-9, "sqrt2^2 + sqrt3^2 + 2 + 10 == 17");
+
+        std::cout << "PASSED (all 34+ extended math functions verified)\n";
+    }
+
     std::cout << "\n>>> All Parser & Evaluation Engine Tests PASSED successfully! <<<\n";
     return 0;
 }

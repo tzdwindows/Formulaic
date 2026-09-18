@@ -14,18 +14,62 @@ const std::unordered_map<std::string_view, double> kBuiltinConstants = {
     {"tau", 6.28318530717958647692},
     {"TAU", 6.28318530717958647692},
     {"phi", 1.61803398874989484820},
-    {"PHI", 1.61803398874989484820}
+    {"PHI", 1.61803398874989484820},
+    {"sqrt2", 1.41421356237309504880},
+    {"SQRT2", 1.41421356237309504880},
+    {"sqrt3", 1.73205080756887729352},
+    {"SQRT3", 1.73205080756887729352},
+    {"euler", 0.57721566490153286060},
+    {"EULER", 0.57721566490153286060},
+    {"ln2", 0.69314718055994530941},
+    {"LN2", 0.69314718055994530941},
+    {"ln10", 2.30258509299404568401},
+    {"LN10", 2.30258509299404568401},
+    {"inf", std::numeric_limits<double>::infinity()},
+    {"INF", std::numeric_limits<double>::infinity()}
 };
 
 const std::unordered_map<std::string_view, size_t> kKnownFunctions = {
+    // Trigonometric
     {"sin", 1}, {"cos", 1}, {"tan", 1},
     {"asin", 1}, {"acos", 1}, {"atan", 1},
+    {"sec", 1}, {"csc", 1}, {"cot", 1},
+    {"asec", 1}, {"acsc", 1}, {"acot", 1},
+
+    // Hyperbolic & Inverse Hyperbolic
     {"sinh", 1}, {"cosh", 1}, {"tanh", 1},
-    {"exp", 1}, {"ln", 1}, {"log", 1}, {"log10", 1}, {"log2", 1},
+    {"sech", 1}, {"csch", 1}, {"coth", 1},
+    {"asinh", 1}, {"arsinh", 1},
+    {"acosh", 1}, {"arcosh", 1},
+    {"atanh", 1}, {"artanh", 1},
+
+    // Special & Statistical
+    {"sinc", 1}, {"erf", 1}, {"erfc", 1},
+    {"gamma", 1}, {"tgamma", 1}, {"lgamma", 1},
+
+    // Exponential & Logarithmic
+    {"exp", 1}, {"exp2", 1}, {"expm1", 1},
+    {"ln", 1}, {"log", 1}, {"log10", 1}, {"log2", 1}, {"log1p", 1},
+
+    // Roots, Rounding, Modulo
     {"sqrt", 1}, {"cbrt", 1}, {"abs", 1},
-    {"floor", 1}, {"ceil", 1}, {"round", 1}, {"sign", 1},
+    {"floor", 1}, {"ceil", 1}, {"round", 1},
+    {"trunc", 1}, {"frac", 1}, {"fract", 1}, {"sign", 1},
+
+    // Signal & Angle Transforms
+    {"heaviside", 1}, {"rect", 1}, {"tri", 1},
+    {"deg2rad", 1}, {"radians", 1},
+    {"rad2deg", 1}, {"degrees", 1},
+
+    // 2-Argument Functions
     {"atan2", 2}, {"min", 2}, {"max", 2}, {"pow", 2},
-    {"clamp", 3}
+    {"hypot", 2}, {"copysign", 2},
+    {"fmod", 2}, {"mod", 2},
+    {"remainder", 2}, {"rem", 2},
+    {"step", 2}, {"beta", 2},
+
+    // 3-Argument Functions
+    {"clamp", 3}, {"smoothstep", 3}, {"lerp", 3}, {"mix", 3}
 };
 
 } // anonymous namespace
