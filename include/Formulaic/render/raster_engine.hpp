@@ -22,6 +22,28 @@ struct FORMULAIC_API GridStyle {
     int minor_divisions{5};
 };
 
+struct HitTestResult {
+    bool hit{false};
+    Point2D world_pos{0.0, 0.0};
+    Point2I screen_pos{0, 0};
+    double value{0.0};
+    double distance_screen_px{0.0};
+    std::string expr_name;
+    std::string formatted_info;
+
+    [[nodiscard]] HoverInfo to_hover_info() const {
+        HoverInfo info{};
+        info.is_hovered = hit;
+        info.target_name = expr_name;
+        info.world_pos = world_pos;
+        info.screen_pos = screen_pos;
+        info.value = value;
+        info.distance_px = distance_screen_px;
+        info.detail_text = formatted_info;
+        return info;
+    }
+};
+
 class FORMULAIC_API RasterEngine {
 public:
     RasterEngine() = default;
@@ -34,18 +56,18 @@ public:
         const PipelineHooks* hooks = nullptr
     ) const;
 
-    // Plots an explicit 1D function y = f(x, t)
+    // Plots an explicit 1D function y = f(x, t) with high quality anti-aliasing
     void plot_explicit(
         FrameBuffer& fb,
         const Viewport& vp,
         const Expression& expr,
         Color color = Color::NeonBlue,
-        int line_thickness = 2,
+        double line_thickness = 2.0,
         double time_t = 0.0,
         const PipelineHooks* hooks = nullptr
     ) const;
 
-    // Plots a 2D parametric curve x = fx(t), y = fy(t)
+    // Plots a 2D parametric curve x = fx(t), y = fy(t) with anti-aliasing
     void plot_parametric(
         FrameBuffer& fb,
         const Viewport& vp,
@@ -55,18 +77,18 @@ public:
         double param_end = 6.283185307179586,
         int sample_count = 1000,
         Color color = Color::NeonPink,
-        int line_thickness = 2,
+        double line_thickness = 2.0,
         double time_t = 0.0,
         const PipelineHooks* hooks = nullptr
     ) const;
 
-    // Plots an implicit function f(x, y, t) = 0 using Marching Squares
+    // Plots an implicit function f(x, y, t) = 0 using sub-pixel Marching Squares with anti-aliasing
     void plot_implicit(
         FrameBuffer& fb,
         const Viewport& vp,
         const Expression& expr,
         Color color = Color::NeonGreen,
-        int line_thickness = 2,
+        double line_thickness = 2.0,
         double time_t = 0.0,
         const PipelineHooks* hooks = nullptr
     ) const;
@@ -81,6 +103,24 @@ public:
         double z_max = 1.0,
         double time_t = 0.0,
         const PipelineHooks* hooks = nullptr
+    ) const;
+
+    // Hit tests an explicit function against mouse cursor in screen space
+    [[nodiscard]] HitTestResult hit_test_explicit(
+        const Viewport& vp,
+        const Expression& expr,
+        Point2I mouse_screen,
+        double tolerance_screen_px = 14.0,
+        double time_t = 0.0,
+        std::string_view name = "f(x)"
+    ) const;
+
+    // Draws interactive hover highlight: snapped dot, axis guide lines, and floating info badge
+    void render_hover_indicator(
+        FrameBuffer& fb,
+        const Viewport& vp,
+        const HitTestResult& hit,
+        Color highlight_color = Color::White
     ) const;
 };
 

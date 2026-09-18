@@ -49,11 +49,21 @@ public:
 
     // Primitives
     void draw_line(int x0, int y0, int x1, int y1, Color color, int thickness = 1) noexcept;
-    void draw_line_aa(double x0, double y0, double x1, double y1, Color color) noexcept;
+    
+    // High quality sub-pixel distance-field anti-aliased line with continuous thickness
+    void draw_line_aa(double x0, double y0, double x1, double y1, Color color, double thickness = 1.5) noexcept;
+    void draw_dashed_line_aa(double x0, double y0, double x1, double y1, Color color, double thickness = 1.0, double dash_len = 5.0, double gap_len = 3.0) noexcept;
+
     void draw_rect(int x, int y, int w, int h, Color color) noexcept;
     void fill_rect(int x, int y, int w, int h, Color color) noexcept;
+    void draw_rounded_rect(int x, int y, int w, int h, int radius, Color color, int thickness = 1) noexcept;
+    void fill_rounded_rect(int x, int y, int w, int h, int radius, Color color) noexcept;
+
     void draw_circle(int cx, int cy, int radius, Color color) noexcept;
     void fill_circle(int cx, int cy, int radius, Color color) noexcept;
+    void fill_circle_aa(double cx, double cy, double radius, Color color) noexcept;
+    void draw_circle_aa(double cx, double cy, double radius, Color color, double thickness = 1.5) noexcept;
+
     void draw_text(int x, int y, std::string_view text, Color color, int scale = 1) noexcept;
 
     // Copy utilities

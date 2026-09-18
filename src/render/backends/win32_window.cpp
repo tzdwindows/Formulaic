@@ -86,6 +86,36 @@ public:
         render_callback_ = std::move(callback);
     }
 
+    void set_mouse_callback(MouseCallback callback) override {
+        mouse_callback_ = std::move(callback);
+    }
+
+    void set_hover_callback(HoverCallback callback) override {
+        hover_callback_ = std::move(callback);
+    }
+
+    void dispatch_mouse_event(const MouseEvent& event) override {
+        mouse_pos_ = event.screen_pos;
+        if (mouse_callback_) {
+            mouse_callback_(event);
+        }
+    }
+
+    void notify_hover(const HoverInfo& hover) override {
+        current_hover_ = hover;
+        if (hover_callback_) {
+            hover_callback_(hover);
+        }
+    }
+
+    [[nodiscard]] Point2I mouse_position() const noexcept override {
+        return mouse_pos_;
+    }
+
+    [[nodiscard]] const HoverInfo& current_hover() const noexcept override {
+        return current_hover_;
+    }
+
     [[nodiscard]] FrameBuffer& framebuffer() noexcept override { return framebuffer_; }
     [[nodiscard]] const FrameBuffer& framebuffer() const noexcept override { return framebuffer_; }
     [[nodiscard]] Viewport& viewport() noexcept override { return viewport_; }
@@ -115,6 +145,10 @@ private:
     Viewport viewport_;
     PipelineHooks hooks_;
     RenderCallback render_callback_;
+    Point2I mouse_pos_{-1, -1};
+    HoverInfo current_hover_{};
+    MouseCallback mouse_callback_;
+    HoverCallback hover_callback_;
     BITMAPINFO bmi_{};
 };
 
@@ -129,6 +163,7 @@ struct WindowState {
     bool is_dragging{false};
     int last_mouse_x{0};
     int last_mouse_y{0};
+    double current_time{0.0};
 };
 
 LRESULT CALLBACK ManagedWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
@@ -150,7 +185,7 @@ LRESULT CALLBACK ManagedWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpara
             int h = HIWORD(lparam);
             if (state && state->renderer && w > 0 && h > 0) {
                 state->renderer->on_resize(w, h);
-                state->renderer->render(0.0);
+                state->renderer->render(state->current_time);
                 state->renderer->present();
             }
             return 0;
@@ -170,34 +205,105 @@ LRESULT CALLBACK ManagedWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpara
         }
 
         case WM_LBUTTONDOWN: {
-            if (state) {
+            if (state && state->renderer) {
                 state->is_dragging = true;
                 state->last_mouse_x = GET_X_LPARAM(lparam);
                 state->last_mouse_y = GET_Y_LPARAM(lparam);
                 SetCapture(hwnd);
+
+                MouseEvent me{};
+                me.type = MouseEventType::Down;
+                me.button = MouseButton::Left;
+                me.screen_pos = {state->last_mouse_x, state->last_mouse_y};
+                me.world_pos = state->renderer->viewport().screen_to_world(state->last_mouse_x, state->last_mouse_y);
+                me.ctrl_down = (wparam & MK_CONTROL) != 0;
+                me.shift_down = (wparam & MK_SHIFT) != 0;
+                state->renderer->dispatch_mouse_event(me);
             }
             return 0;
         }
 
         case WM_LBUTTONUP: {
-            if (state && state->is_dragging) {
-                state->is_dragging = false;
-                ReleaseCapture();
+            if (state && state->renderer) {
+                if (state->is_dragging) {
+                    state->is_dragging = false;
+                    ReleaseCapture();
+                }
+                int mx = GET_X_LPARAM(lparam);
+                int my = GET_Y_LPARAM(lparam);
+
+                MouseEvent me{};
+                me.type = MouseEventType::Up;
+                me.button = MouseButton::Left;
+                me.screen_pos = {mx, my};
+                me.world_pos = state->renderer->viewport().screen_to_world(mx, my);
+                me.ctrl_down = (wparam & MK_CONTROL) != 0;
+                me.shift_down = (wparam & MK_SHIFT) != 0;
+                state->renderer->dispatch_mouse_event(me);
+            }
+            return 0;
+        }
+
+        case WM_RBUTTONDOWN: {
+            if (state && state->renderer) {
+                int mx = GET_X_LPARAM(lparam);
+                int my = GET_Y_LPARAM(lparam);
+
+                MouseEvent me{};
+                me.type = MouseEventType::Down;
+                me.button = MouseButton::Right;
+                me.screen_pos = {mx, my};
+                me.world_pos = state->renderer->viewport().screen_to_world(mx, my);
+                me.ctrl_down = (wparam & MK_CONTROL) != 0;
+                me.shift_down = (wparam & MK_SHIFT) != 0;
+                state->renderer->dispatch_mouse_event(me);
+            }
+            return 0;
+        }
+
+        case WM_RBUTTONUP: {
+            if (state && state->renderer) {
+                int mx = GET_X_LPARAM(lparam);
+                int my = GET_Y_LPARAM(lparam);
+
+                MouseEvent me{};
+                me.type = MouseEventType::Up;
+                me.button = MouseButton::Right;
+                me.screen_pos = {mx, my};
+                me.world_pos = state->renderer->viewport().screen_to_world(mx, my);
+                me.ctrl_down = (wparam & MK_CONTROL) != 0;
+                me.shift_down = (wparam & MK_SHIFT) != 0;
+                state->renderer->dispatch_mouse_event(me);
             }
             return 0;
         }
 
         case WM_MOUSEMOVE: {
-            if (state && state->is_dragging && state->renderer) {
+            if (state && state->renderer) {
                 int mx = GET_X_LPARAM(lparam);
                 int my = GET_Y_LPARAM(lparam);
-                int dx = mx - state->last_mouse_x;
-                int dy = my - state->last_mouse_y;
-                state->last_mouse_x = mx;
-                state->last_mouse_y = my;
 
-                state->renderer->viewport().pan(dx, dy);
-                state->renderer->render(0.0);
+                MouseEvent me{};
+                me.type = MouseEventType::Move;
+                me.button = state->is_dragging ? MouseButton::Left : MouseButton::None;
+                me.screen_pos = {mx, my};
+                me.world_pos = state->renderer->viewport().screen_to_world(mx, my);
+                me.ctrl_down = (wparam & MK_CONTROL) != 0;
+                me.shift_down = (wparam & MK_SHIFT) != 0;
+
+                state->renderer->dispatch_mouse_event(me);
+
+                if (state->is_dragging) {
+                    int dx = mx - state->last_mouse_x;
+                    int dy = my - state->last_mouse_y;
+                    state->last_mouse_x = mx;
+                    state->last_mouse_y = my;
+
+                    state->renderer->viewport().pan(dx, dy);
+                }
+
+                // Immediately trigger render & present for real-time hover responsiveness
+                state->renderer->render(state->current_time);
                 state->renderer->present();
             }
             return 0;
@@ -211,8 +317,18 @@ LRESULT CALLBACK ManagedWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpara
                 POINT pt{GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
                 ScreenToClient(hwnd, &pt);
 
-                state->renderer->viewport().zoom(factor, {static_cast<double>(pt.x), static_cast<double>(pt.y)});
-                state->renderer->render(0.0);
+                MouseEvent me{};
+                me.type = MouseEventType::Wheel;
+                me.button = MouseButton::Middle;
+                me.screen_pos = {pt.x, pt.y};
+                me.world_pos = state->renderer->viewport().screen_to_world(pt.x, pt.y);
+                me.wheel_delta = delta;
+                me.ctrl_down = (wparam & MK_CONTROL) != 0;
+                me.shift_down = (wparam & MK_SHIFT) != 0;
+                state->renderer->dispatch_mouse_event(me);
+
+                state->renderer->viewport().zoom(factor, Point2D(static_cast<double>(pt.x), static_cast<double>(pt.y)));
+                state->renderer->render(state->current_time);
                 state->renderer->present();
             }
             return 0;
@@ -221,7 +337,7 @@ LRESULT CALLBACK ManagedWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpara
         case WM_LBUTTONDBLCLK: {
             if (state && state->renderer) {
                 state->renderer->viewport().set_bounds(Rect2D(-10.0, 10.0, -10.0, 10.0));
-                state->renderer->render(0.0);
+                state->renderer->render(state->current_time);
                 state->renderer->present();
             }
             return 0;
@@ -292,6 +408,9 @@ void run_win32_message_loop(IWindowRenderer* renderer, bool run_animation) {
     MSG msg{};
     auto start_time = std::chrono::high_resolution_clock::now();
 
+    HWND hwnd = renderer ? reinterpret_cast<HWND>(renderer->native_handle()) : nullptr;
+    WindowState* state = hwnd ? reinterpret_cast<WindowState*>(GetWindowLongPtr(hwnd, GWLP_USERDATA)) : nullptr;
+
     while (msg.message != WM_QUIT) {
         if (PeekMessageA(&msg, nullptr, 0, 0, PM_REMOVE)) {
             TranslateMessage(&msg);
@@ -300,6 +419,9 @@ void run_win32_message_loop(IWindowRenderer* renderer, bool run_animation) {
             if (run_animation && renderer && renderer->is_attached()) {
                 auto now = std::chrono::high_resolution_clock::now();
                 double elapsed = std::chrono::duration<double>(now - start_time).count();
+                if (state) {
+                    state->current_time = elapsed;
+                }
                 renderer->render(elapsed);
                 renderer->present();
             } else {

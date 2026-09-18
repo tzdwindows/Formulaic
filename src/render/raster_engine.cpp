@@ -125,7 +125,7 @@ void RasterEngine::plot_explicit(
     const Viewport& vp,
     const Expression& expr,
     Color color,
-    int line_thickness,
+    double line_thickness,
     double time_t,
     const PipelineHooks* hooks
 ) const {
@@ -173,18 +173,8 @@ void RasterEngine::plot_explicit(
                 draw_color = hooks->shade_pixel(world_pt.x, y_val, y_val, color, time_t);
             }
 
-            if (line_thickness <= 1) {
-                fb.draw_line_aa(prev_pt_screen.x, prev_pt_screen.y, curr_pt_screen.x, curr_pt_screen.y, draw_color);
-            } else {
-                fb.draw_line(
-                    static_cast<int>(std::round(prev_pt_screen.x)),
-                    static_cast<int>(std::round(prev_pt_screen.y)),
-                    static_cast<int>(std::round(curr_pt_screen.x)),
-                    static_cast<int>(std::round(curr_pt_screen.y)),
-                    draw_color,
-                    line_thickness
-                );
-            }
+            // Always use distance-field sub-pixel anti-aliasing with continuous thickness
+            fb.draw_line_aa(prev_pt_screen.x, prev_pt_screen.y, curr_pt_screen.x, curr_pt_screen.y, draw_color, line_thickness);
         }
 
         prev_pt_screen = curr_pt_screen;
@@ -202,7 +192,7 @@ void RasterEngine::plot_parametric(
     double param_end,
     int sample_count,
     Color color,
-    int line_thickness,
+    double line_thickness,
     double time_t,
     const PipelineHooks* hooks
 ) const {
@@ -235,18 +225,7 @@ void RasterEngine::plot_parametric(
                 draw_color = hooks->shade_pixel(wx, wy, t, color, time_t);
             }
 
-            if (line_thickness <= 1) {
-                fb.draw_line_aa(prev_pt_screen.x, prev_pt_screen.y, curr_pt_screen.x, curr_pt_screen.y, draw_color);
-            } else {
-                fb.draw_line(
-                    static_cast<int>(std::round(prev_pt_screen.x)),
-                    static_cast<int>(std::round(prev_pt_screen.y)),
-                    static_cast<int>(std::round(curr_pt_screen.x)),
-                    static_cast<int>(std::round(curr_pt_screen.y)),
-                    draw_color,
-                    line_thickness
-                );
-            }
+            fb.draw_line_aa(prev_pt_screen.x, prev_pt_screen.y, curr_pt_screen.x, curr_pt_screen.y, draw_color, line_thickness);
         }
 
         prev_pt_screen = curr_pt_screen;
@@ -260,7 +239,7 @@ void RasterEngine::plot_implicit(
     const Viewport& vp,
     const Expression& expr,
     Color color,
-    int line_thickness,
+    double line_thickness,
     double time_t,
     const PipelineHooks* hooks
 ) const {
@@ -293,15 +272,13 @@ void RasterEngine::plot_implicit(
     };
 
     auto draw_seg = [&](Point2D p1, Point2D p2) {
+        Color c = color;
         if (hooks && hooks->has_pixel_shader_hook()) {
             Point2D mid_world = vp.screen_to_world((p1.x + p2.x) * 0.5, (p1.y + p2.y) * 0.5);
-            Color c = hooks->shade_pixel(mid_world.x, mid_world.y, 0.0, color, time_t);
-            fb.draw_line(static_cast<int>(p1.x), static_cast<int>(p1.y),
-                         static_cast<int>(p2.x), static_cast<int>(p2.y), c, line_thickness);
-        } else {
-            fb.draw_line(static_cast<int>(p1.x), static_cast<int>(p1.y),
-                         static_cast<int>(p2.x), static_cast<int>(p2.y), color, line_thickness);
+            c = hooks->shade_pixel(mid_world.x, mid_world.y, 0.0, color, time_t);
         }
+        // Sub-pixel floating-point anti-aliased segment
+        fb.draw_line_aa(p1.x, p1.y, p2.x, p2.y, c, line_thickness);
     };
 
     // 2. Marching squares cell evaluation
@@ -390,6 +367,120 @@ void RasterEngine::plot_scalar_field(
             fb.set_pixel(x, y, base_color);
         }
     }
+}
+
+HitTestResult RasterEngine::hit_test_explicit(
+    const Viewport& vp,
+    const Expression& expr,
+    Point2I mouse_screen,
+    double tolerance_screen_px,
+    double time_t,
+    std::string_view name
+) const {
+    HitTestResult res;
+    if (!expr.is_valid() || mouse_screen.x < 0 || mouse_screen.x >= vp.width() ||
+        mouse_screen.y < 0 || mouse_screen.y >= vp.height()) {
+        return res;
+    }
+
+    Point2D mouse_world = vp.screen_to_world(mouse_screen.x, mouse_screen.y);
+    double curve_y = expr.eval(mouse_world.x, 0.0, time_t);
+
+    if (std::isnan(curve_y) || std::isinf(curve_y)) {
+        return res;
+    }
+
+    Point2I curve_screen = vp.world_to_screen({mouse_world.x, curve_y});
+    double min_dist_px = std::abs(curve_screen.y - mouse_screen.y);
+    double best_wx = mouse_world.x;
+    double best_wy = curve_y;
+    Point2I best_screen = curve_screen;
+
+    // Search small horizontal neighborhood (+/- 4 px) to find minimum distance on steep curves
+    for (int offset_px = -4; offset_px <= 4; ++offset_px) {
+        if (offset_px == 0) continue;
+        int sx = mouse_screen.x + offset_px;
+        if (sx < 0 || sx >= vp.width()) continue;
+        Point2D w_pt = vp.screen_to_world(sx, mouse_screen.y);
+        double wy = expr.eval(w_pt.x, 0.0, time_t);
+        if (std::isnan(wy) || std::isinf(wy)) continue;
+        Point2I s_pt = vp.world_to_screen({w_pt.x, wy});
+        double d = std::sqrt(static_cast<double>((s_pt.x - mouse_screen.x) * (s_pt.x - mouse_screen.x) +
+                                                (s_pt.y - mouse_screen.y) * (s_pt.y - mouse_screen.y)));
+        if (d < min_dist_px) {
+            min_dist_px = d;
+            best_wx = w_pt.x;
+            best_wy = wy;
+            best_screen = s_pt;
+        }
+    }
+
+    if (min_dist_px <= tolerance_screen_px) {
+        res.hit = true;
+        res.world_pos = {best_wx, best_wy};
+        res.screen_pos = best_screen;
+        res.value = best_wy;
+        res.distance_screen_px = min_dist_px;
+        res.expr_name = std::string(name);
+
+        std::ostringstream oss;
+        oss << std::fixed << std::setprecision(3);
+        oss << res.expr_name << ": x=" << best_wx << ", y=" << best_wy;
+        res.formatted_info = oss.str();
+    }
+
+    return res;
+}
+
+void RasterEngine::render_hover_indicator(
+    FrameBuffer& fb,
+    const Viewport& vp,
+    const HitTestResult& hit,
+    Color highlight_color
+) const {
+    if (!hit.hit) return;
+
+    // 1. Dashed projection lines from hovered curve point to axes
+    Point2I x_axis_pt = vp.world_to_screen({hit.world_pos.x, 0.0});
+    Point2I y_axis_pt = vp.world_to_screen({0.0, hit.world_pos.y});
+
+    Color guide_color(160, 170, 200, 160);
+    fb.draw_dashed_line_aa(hit.screen_pos.x, hit.screen_pos.y, hit.screen_pos.x, x_axis_pt.y, guide_color, 1.2, 4.0, 3.0);
+    fb.draw_dashed_line_aa(hit.screen_pos.x, hit.screen_pos.y, y_axis_pt.x, hit.screen_pos.y, guide_color, 1.2, 4.0, 3.0);
+
+    // 2. Snapped glowing marker dot
+    fb.fill_circle_aa(hit.screen_pos.x, hit.screen_pos.y, 9.0, highlight_color.with_alpha(90)); // outer glow halo
+    fb.fill_circle_aa(hit.screen_pos.x, hit.screen_pos.y, 4.5, Color::White);                   // center bright core
+    fb.draw_circle_aa(hit.screen_pos.x, hit.screen_pos.y, 4.5, highlight_color, 1.5);           // crisp ring
+
+    // 3. Floating rounded interactive callout badge
+    constexpr int badge_w = 145;
+    constexpr int badge_h = 56;
+
+    int bx = hit.screen_pos.x + 14;
+    int by = hit.screen_pos.y - badge_h - 10;
+
+    if (bx + badge_w > fb.width() - 8) {
+        bx = hit.screen_pos.x - badge_w - 14;
+    }
+    if (by < 8) {
+        by = hit.screen_pos.y + 14;
+    }
+
+    // Frosted glass background
+    fb.fill_rounded_rect(bx, by, badge_w, badge_h, 6, Color(20, 22, 30, 235));
+    fb.draw_rounded_rect(bx, by, badge_w, badge_h, 6, highlight_color.with_alpha(200), 1);
+
+    // Text info inside callout badge
+    fb.draw_text(bx + 10, by + 8, hit.expr_name, highlight_color);
+
+    std::ostringstream sx;
+    sx << std::fixed << std::setprecision(3) << "X: " << hit.world_pos.x;
+    fb.draw_text(bx + 10, by + 23, sx.str(), Color::LightGray);
+
+    std::ostringstream sy;
+    sy << std::fixed << std::setprecision(3) << "Y: " << hit.world_pos.y;
+    fb.draw_text(bx + 10, by + 38, sy.str(), Color::LightGray);
 }
 
 } // namespace formulaic

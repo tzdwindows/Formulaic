@@ -33,6 +33,17 @@ public:
     using RenderCallback = std::function<void(FrameBuffer& fb, const Viewport& vp, double time)>;
     virtual void set_render_callback(RenderCallback callback) = 0;
 
+    // Interactive event callbacks
+    using MouseCallback = std::function<void(const MouseEvent& event)>;
+    using HoverCallback = std::function<void(const HoverInfo& hover)>;
+
+    virtual void set_mouse_callback(MouseCallback callback) = 0;
+    virtual void set_hover_callback(HoverCallback callback) = 0;
+    virtual void dispatch_mouse_event(const MouseEvent& event) = 0;
+    virtual void notify_hover(const HoverInfo& hover) = 0;
+    [[nodiscard]] virtual Point2I mouse_position() const noexcept = 0;
+    [[nodiscard]] virtual const HoverInfo& current_hover() const noexcept = 0;
+
     // Accessors
     [[nodiscard]] virtual FrameBuffer& framebuffer() noexcept = 0;
     [[nodiscard]] virtual const FrameBuffer& framebuffer() const noexcept = 0;

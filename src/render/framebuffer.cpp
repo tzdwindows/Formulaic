@@ -181,70 +181,86 @@ void FrameBuffer::draw_line(int x0, int y0, int x1, int y1, Color color, int thi
     }
 }
 
-// Xiaolin Wu's Anti-Aliased Line Drawing
-void FrameBuffer::draw_line_aa(double x0, double y0, double x1, double y1, Color color) noexcept {
-    const bool steep = std::abs(y1 - y0) > std::abs(x0 - x1);
-    if (steep) {
-        std::swap(x0, y0);
-        std::swap(x1, y1);
-    }
-    if (x0 > x1) {
-        std::swap(x0, x1);
-        std::swap(y0, y1);
-    }
+// Distance-Field Sub-pixel Anti-Aliased Line Drawing with Continuous Thickness
+void FrameBuffer::draw_line_aa(double x0, double y0, double x1, double y1, Color color, double thickness) noexcept {
+    if (thickness <= 0.0 || color.a == 0) return;
 
+    const double radius = thickness * 0.5;
+    const double radius_plus_1 = radius + 1.0;
+
+    const int min_x = std::max(0, static_cast<int>(std::floor(std::min(x0, x1) - radius_plus_1)));
+    const int max_x = std::min(width_ - 1, static_cast<int>(std::ceil(std::max(x0, x1) + radius_plus_1)));
+    const int min_y = std::max(0, static_cast<int>(std::floor(std::min(y0, y1) - radius_plus_1)));
+    const int max_y = std::min(height_ - 1, static_cast<int>(std::ceil(std::max(y0, y1) + radius_plus_1)));
+
+    if (min_x > max_x || min_y > max_y) return;
+
+    const double vx = x1 - x0;
+    const double vy = y1 - y0;
+    const double len_sq = vx * vx + vy * vy;
+    const double base_alpha = color.a;
+
+    for (int y = min_y; y <= max_y; ++y) {
+        const double py = y + 0.5;
+        const double w_y = py - y0;
+
+        for (int x = min_x; x <= max_x; ++x) {
+            const double px = x + 0.5;
+            const double w_x = px - x0;
+
+            double dist_sq = 0.0;
+            if (len_sq < 1e-6) {
+                dist_sq = w_x * w_x + w_y * w_y;
+            } else {
+                double t = (w_x * vx + w_y * vy) / len_sq;
+                t = std::clamp(t, 0.0, 1.0);
+                const double qx = x0 + t * vx;
+                const double qy = y0 + t * vy;
+                const double dx = px - qx;
+                const double dy = py - qy;
+                dist_sq = dx * dx + dy * dy;
+            }
+
+            const double dist = std::sqrt(dist_sq);
+            if (dist < radius_plus_1) {
+                const double coverage = std::clamp(0.5 + radius - dist, 0.0, 1.0);
+                if (coverage > 0.0) {
+                    const uint8_t alpha = static_cast<uint8_t>(std::round(base_alpha * coverage));
+                    if (alpha > 0) {
+                        blend_pixel(x, y, color.with_alpha(alpha));
+                    }
+                }
+            }
+        }
+    }
+}
+
+void FrameBuffer::draw_dashed_line_aa(
+    double x0, double y0, double x1, double y1,
+    Color color, double thickness,
+    double dash_len, double gap_len
+) noexcept {
     const double dx = x1 - x0;
     const double dy = y1 - y0;
-    const double gradient = (dx == 0.0) ? 1.0 : (dy / dx);
+    const double total_len = std::sqrt(dx * dx + dy * dy);
+    if (total_len < 1e-4) return;
 
-    // Handle first endpoint
-    double xend = std::round(x0);
-    double yend = y0 + gradient * (xend - x0);
-    double xgap = 1.0 - (x0 + 0.5 - std::floor(x0 + 0.5));
-    const int xpxl1 = static_cast<int>(xend);
-    const int ypxl1 = static_cast<int>(std::floor(yend));
+    const double unit_x = dx / total_len;
+    const double unit_y = dy / total_len;
+    const double step = dash_len + gap_len;
 
-    if (steep) {
-        blend_pixel(ypxl1,     xpxl1, color.with_alpha(static_cast<uint8_t>(color.a * (1.0 - (yend - std::floor(yend))) * xgap)));
-        blend_pixel(ypxl1 + 1, xpxl1, color.with_alpha(static_cast<uint8_t>(color.a * (yend - std::floor(yend)) * xgap)));
-    } else {
-        blend_pixel(xpxl1, ypxl1,     color.with_alpha(static_cast<uint8_t>(color.a * (1.0 - (yend - std::floor(yend))) * xgap)));
-        blend_pixel(xpxl1, ypxl1 + 1, color.with_alpha(static_cast<uint8_t>(color.a * (yend - std::floor(yend)) * xgap)));
-    }
-    double intery = yend + gradient;
-
-    // Handle second endpoint
-    xend = std::round(x1);
-    yend = y1 + gradient * (xend - x1);
-    xgap = x1 + 0.5 - std::floor(x1 + 0.5);
-    const int xpxl2 = static_cast<int>(xend);
-    const int ypxl2 = static_cast<int>(std::floor(yend));
-
-    if (steep) {
-        blend_pixel(ypxl2,     xpxl2, color.with_alpha(static_cast<uint8_t>(color.a * (1.0 - (yend - std::floor(yend))) * xgap)));
-        blend_pixel(ypxl2 + 1, xpxl2, color.with_alpha(static_cast<uint8_t>(color.a * (yend - std::floor(yend)) * xgap)));
-    } else {
-        blend_pixel(xpxl2, ypxl2,     color.with_alpha(static_cast<uint8_t>(color.a * (1.0 - (yend - std::floor(yend))) * xgap)));
-        blend_pixel(xpxl2, ypxl2 + 1, color.with_alpha(static_cast<uint8_t>(color.a * (yend - std::floor(yend)) * xgap)));
-    }
-
-    // Main loop
-    if (steep) {
-        for (int x = xpxl1 + 1; x < xpxl2; ++x) {
-            const int y = static_cast<int>(std::floor(intery));
-            const double f = intery - y;
-            blend_pixel(y,     x, color.with_alpha(static_cast<uint8_t>(color.a * (1.0 - f))));
-            blend_pixel(y + 1, x, color.with_alpha(static_cast<uint8_t>(color.a * f)));
-            intery += gradient;
+    double current_dist = 0.0;
+    while (current_dist < total_len) {
+        const double seg_start = current_dist;
+        const double seg_end = std::min(total_len, current_dist + dash_len);
+        if (seg_end > seg_start) {
+            draw_line_aa(
+                x0 + unit_x * seg_start, y0 + unit_y * seg_start,
+                x0 + unit_x * seg_end,   y0 + unit_y * seg_end,
+                color, thickness
+            );
         }
-    } else {
-        for (int x = xpxl1 + 1; x < xpxl2; ++x) {
-            const int y = static_cast<int>(std::floor(intery));
-            const double f = intery - y;
-            blend_pixel(x, y,     color.with_alpha(static_cast<uint8_t>(color.a * (1.0 - f))));
-            blend_pixel(x, y + 1, color.with_alpha(static_cast<uint8_t>(color.a * f)));
-            intery += gradient;
-        }
+        current_dist += step;
     }
 }
 
@@ -327,6 +343,107 @@ void FrameBuffer::fill_circle(int cx, int cy, int radius, Color color) noexcept 
             set_pixel(x, y, color);
         }
     }
+}
+
+void FrameBuffer::fill_circle_aa(double cx, double cy, double radius, Color color) noexcept {
+    if (radius <= 0.0 || color.a == 0) return;
+
+    const int min_x = std::max(0, static_cast<int>(std::floor(cx - radius - 1.0)));
+    const int max_x = std::min(width_ - 1, static_cast<int>(std::ceil(cx + radius + 1.0)));
+    const int min_y = std::max(0, static_cast<int>(std::floor(cy - radius - 1.0)));
+    const int max_y = std::min(height_ - 1, static_cast<int>(std::ceil(cy + radius + 1.0)));
+
+    const double base_alpha = color.a;
+
+    for (int y = min_y; y <= max_y; ++y) {
+        const double py = y + 0.5;
+        const double dy = py - cy;
+        for (int x = min_x; x <= max_x; ++x) {
+            const double px = x + 0.5;
+            const double dx = px - cx;
+            const double dist = std::sqrt(dx * dx + dy * dy);
+            if (dist < radius + 1.0) {
+                const double coverage = std::clamp(0.5 + radius - dist, 0.0, 1.0);
+                if (coverage > 0.0) {
+                    const uint8_t alpha = static_cast<uint8_t>(std::round(base_alpha * coverage));
+                    if (alpha > 0) {
+                        blend_pixel(x, y, color.with_alpha(alpha));
+                    }
+                }
+            }
+        }
+    }
+}
+
+void FrameBuffer::draw_circle_aa(double cx, double cy, double radius, Color color, double thickness) noexcept {
+    if (radius <= 0.0 || thickness <= 0.0 || color.a == 0) return;
+
+    const double half_thick = thickness * 0.5;
+    const double outer_r = radius + half_thick + 1.0;
+
+    const int min_x = std::max(0, static_cast<int>(std::floor(cx - outer_r)));
+    const int max_x = std::min(width_ - 1, static_cast<int>(std::ceil(cx + outer_r)));
+    const int min_y = std::max(0, static_cast<int>(std::floor(cy - outer_r)));
+    const int max_y = std::min(height_ - 1, static_cast<int>(std::ceil(cy + outer_r)));
+
+    const double base_alpha = color.a;
+
+    for (int y = min_y; y <= max_y; ++y) {
+        const double py = y + 0.5;
+        const double dy = py - cy;
+        for (int x = min_x; x <= max_x; ++x) {
+            const double px = x + 0.5;
+            const double dx = px - cx;
+            const double dist = std::sqrt(dx * dx + dy * dy);
+            const double delta = std::abs(dist - radius);
+            if (delta < half_thick + 1.0) {
+                const double coverage = std::clamp(0.5 + half_thick - delta, 0.0, 1.0);
+                if (coverage > 0.0) {
+                    const uint8_t alpha = static_cast<uint8_t>(std::round(base_alpha * coverage));
+                    if (alpha > 0) {
+                        blend_pixel(x, y, color.with_alpha(alpha));
+                    }
+                }
+            }
+        }
+    }
+}
+
+void FrameBuffer::fill_rounded_rect(int x, int y, int w, int h, int radius, Color color) noexcept {
+    if (w <= 0 || h <= 0) return;
+    radius = std::clamp(radius, 0, std::min(w, h) / 2);
+    if (radius <= 0) {
+        fill_rect(x, y, w, h, color);
+        return;
+    }
+
+    // Center body
+    fill_rect(x + radius, y, w - 2 * radius, h, color);
+    // Left & right strips
+    fill_rect(x, y + radius, radius, h - 2 * radius, color);
+    fill_rect(x + w - radius, y + radius, radius, h - 2 * radius, color);
+
+    // 4 anti-aliased corners
+    fill_circle_aa(x + radius,          y + radius,          radius, color);
+    fill_circle_aa(x + w - radius - 1,  y + radius,          radius, color);
+    fill_circle_aa(x + radius,          y + h - radius - 1,  radius, color);
+    fill_circle_aa(x + w - radius - 1,  y + h - radius - 1,  radius, color);
+}
+
+void FrameBuffer::draw_rounded_rect(int x, int y, int w, int h, int radius, Color color, int thickness) noexcept {
+    if (w <= 0 || h <= 0) return;
+    radius = std::clamp(radius, 0, std::min(w, h) / 2);
+    if (radius <= 0) {
+        draw_rect(x, y, w, h, color);
+        return;
+    }
+
+    const double t = static_cast<double>(thickness);
+    // 4 straight edges
+    draw_line_aa(x + radius, y, x + w - radius, y, color, t);
+    draw_line_aa(x + radius, y + h - 1, x + w - radius, y + h - 1, color, t);
+    draw_line_aa(x, y + radius, x, y + h - radius, color, t);
+    draw_line_aa(x + w - 1, y + radius, x + w - 1, y + h - radius, color, t);
 }
 
 void FrameBuffer::draw_text(int x, int y, std::string_view text, Color color, int scale) noexcept {

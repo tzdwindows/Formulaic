@@ -182,6 +182,83 @@ int main() {
         std::cout << "PASSED (5 continuous frames generated)\n";
     }
 
+    // 7. Sub-pixel Anti-Aliased Line and Geometric Rendering
+    {
+        std::cout << "[Test 7] Sub-pixel Anti-Aliasing (Distance-field coverage)... ";
+        formulaic::FrameBuffer fb(100, 100, formulaic::Color::Black);
+
+        // Draw an anti-aliased line diagonally
+        fb.draw_line_aa(10.0, 10.0, 80.0, 50.0, formulaic::Color::White, 2.5);
+
+        // Check that pixels near the center of the line are bright, and edges have fractional anti-aliasing
+        auto center_px = fb.get_pixel(45, 30);
+        TEST_ASSERT(center_px.r > 200, "Core pixel of anti-aliased line is bright");
+
+        // Verify fractional coverage exists along edge (anti-aliasing smooth transition)
+        bool found_fractional_pixel = false;
+        for (int y = 25; y <= 35; ++y) {
+            for (int x = 40; x <= 50; ++x) {
+                auto px = fb.get_pixel(x, y);
+                if (px.r > 20 && px.r < 235) {
+                    found_fractional_pixel = true;
+                    break;
+                }
+            }
+            if (found_fractional_pixel) break;
+        }
+        TEST_ASSERT(found_fractional_pixel, "Anti-aliased line has smooth sub-pixel alpha coverage");
+
+        // Test dashed line AA and circles AA
+        fb.draw_dashed_line_aa(5.0, 5.0, 95.0, 5.0, formulaic::Color::Cyan, 2.0, 5.0, 3.0);
+        fb.fill_circle_aa(50.0, 50.0, 15.0, formulaic::Color::NeonGreen);
+        fb.draw_circle_aa(50.0, 50.0, 15.0, formulaic::Color::White, 1.5);
+        fb.fill_rounded_rect(10, 60, 40, 30, 4, formulaic::Color::NeonPink);
+
+        auto bmp_path = output_dir / "test_antialiasing_primitives.bmp";
+        auto res = formulaic::ImageExport::save_bmp(fb, bmp_path);
+        TEST_ASSERT(res.has_value(), res.error().format());
+        std::cout << "PASSED -> Saved to " << bmp_path.string() << "\n";
+    }
+
+    // 8. Curve Hit-Testing and Interactive Hover Rendering
+    {
+        std::cout << "[Test 8] Curve Hit-Testing & Hover Indicator... ";
+        formulaic::FrameBuffer fb(800, 600, formulaic::Color::BackgroundDark);
+        formulaic::Viewport vp(800, 600, formulaic::Rect2D(-5.0, 5.0, -5.0, 5.0));
+        formulaic::RasterEngine engine;
+
+        auto expr = formulaic::Expression::parse("x^2 - 2", {"x"});
+        TEST_ASSERT(expr.has_value(), expr.error().format());
+
+        // Known point on curve: x = 2.0, y = 2.0
+        formulaic::Point2I screen_pt = vp.world_to_screen({2.0, 2.0});
+
+        // Hit test directly at the point
+        auto hit_exact = engine.hit_test_explicit(vp, expr.value(), screen_pt, 10.0, 0.0, "Parabola");
+        TEST_ASSERT(hit_exact.hit, "Hit test detected known point on curve");
+        TEST_ASSERT(std::abs(hit_exact.world_pos.x - 2.0) < 0.05, "Hit world X matches");
+        TEST_ASSERT(std::abs(hit_exact.world_pos.y - 2.0) < 0.05, "Hit world Y matches");
+
+        // Hit test near the point within tolerance (e.g. 5px away)
+        formulaic::Point2I screen_near = {screen_pt.x + 3, screen_pt.y + 4};
+        auto hit_near = engine.hit_test_explicit(vp, expr.value(), screen_near, 12.0, 0.0, "Parabola");
+        TEST_ASSERT(hit_near.hit, "Hit test detected point within tolerance");
+
+        // Hit test far from curve (e.g. 100px away)
+        formulaic::Point2I screen_far = {screen_pt.x, screen_pt.y + 100};
+        auto hit_far = engine.hit_test_explicit(vp, expr.value(), screen_far, 12.0, 0.0, "Parabola");
+        TEST_ASSERT(!hit_far.hit, "Hit test rejects points far from curve");
+
+        // Render hover indicator onto framebuffer
+        engine.plot_explicit(fb, vp, expr.value(), formulaic::Color::NeonBlue, 2.0);
+        engine.render_hover_indicator(fb, vp, hit_exact, formulaic::Color::NeonGreen);
+
+        auto bmp_path = output_dir / "test_hover_indicator.bmp";
+        auto res = formulaic::ImageExport::save_bmp(fb, bmp_path);
+        TEST_ASSERT(res.has_value(), res.error().format());
+        std::cout << "PASSED -> Saved to " << bmp_path.string() << "\n";
+    }
+
     std::cout << "\n>>> All Offline Raster & Exporter Tests PASSED successfully! <<<\n";
     return 0;
 }

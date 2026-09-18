@@ -78,4 +78,41 @@ enum class BlendMode : uint8_t {
     Multiply
 };
 
+enum class MouseButton : uint8_t {
+    None = 0,
+    Left,
+    Right,
+    Middle
+};
+
+enum class MouseEventType : uint8_t {
+    Move,
+    Down,
+    Up,
+    Wheel,
+    Enter,
+    Leave
+};
+
+struct MouseEvent {
+    MouseEventType type{MouseEventType::Move};
+    MouseButton button{MouseButton::None};
+    Point2I screen_pos{0, 0};
+    Point2D world_pos{0.0, 0.0};
+    double wheel_delta{0.0};
+    bool ctrl_down{false};
+    bool shift_down{false};
+    bool alt_down{false};
+};
+
+struct HoverInfo {
+    bool is_hovered{false};
+    std::string target_name;
+    Point2D world_pos{0.0, 0.0};
+    Point2I screen_pos{0, 0};
+    double value{0.0};
+    double distance_px{0.0};
+    std::string detail_text;
+};
+
 } // namespace formulaic

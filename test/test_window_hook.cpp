@@ -137,6 +137,57 @@ int main() {
         std::cout << "PASSED\n";
     }
 
+    // 3. Interactive Events & Hover Callbacks
+    {
+        std::cout << "[Test 3] Interactive Mouse & Hover Event Callbacks... ";
+        auto renderer = formulaic::create_window_renderer();
+
+        bool mouse_event_received = false;
+        formulaic::MouseEvent captured_me{};
+        renderer->set_mouse_callback([&](const formulaic::MouseEvent& me) {
+            mouse_event_received = true;
+            captured_me = me;
+        });
+
+        bool hover_event_received = false;
+        formulaic::HoverInfo captured_hover{};
+        renderer->set_hover_callback([&](const formulaic::HoverInfo& hover) {
+            hover_event_received = true;
+            captured_hover = hover;
+        });
+
+        // Dispatch mouse event
+        formulaic::MouseEvent me{};
+        me.type = formulaic::MouseEventType::Move;
+        me.screen_pos = {150, 280};
+        me.world_pos = {1.5, -2.8};
+        me.button = formulaic::MouseButton::None;
+        renderer->dispatch_mouse_event(me);
+
+        TEST_ASSERT(mouse_event_received, "Mouse callback executed on dispatch");
+        TEST_ASSERT(captured_me.screen_pos.x == 150 && captured_me.screen_pos.y == 280, "Captured screen position matches");
+        TEST_ASSERT(renderer->mouse_position().x == 150 && renderer->mouse_position().y == 280, "Renderer mouse_position matches");
+
+        // Notify hover
+        formulaic::HoverInfo hi{};
+        hi.is_hovered = true;
+        hi.target_name = "sin(x)";
+        hi.world_pos = {1.5, 0.997};
+        hi.screen_pos = {150, 120};
+        hi.value = 0.997;
+        hi.distance_px = 3.2;
+        hi.detail_text = "sin(x): x=1.5, y=0.997";
+        renderer->notify_hover(hi);
+
+        TEST_ASSERT(hover_event_received, "Hover callback executed on notify_hover");
+        TEST_ASSERT(captured_hover.is_hovered, "Hover state is hovered");
+        TEST_ASSERT(captured_hover.target_name == "sin(x)", "Hover target name matches");
+        TEST_ASSERT(renderer->current_hover().is_hovered, "Renderer current_hover matches");
+        TEST_ASSERT(renderer->current_hover().target_name == "sin(x)", "Renderer current_hover target matches");
+
+        std::cout << "PASSED\n";
+    }
+
     std::cout << "\n>>> All Window Binding & Hook Tests PASSED successfully! <<<\n";
     return 0;
 }

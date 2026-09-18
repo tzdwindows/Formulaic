@@ -37,6 +37,36 @@ public:
         render_callback_ = std::move(callback);
     }
 
+    void set_mouse_callback(MouseCallback callback) override {
+        mouse_callback_ = std::move(callback);
+    }
+
+    void set_hover_callback(HoverCallback callback) override {
+        hover_callback_ = std::move(callback);
+    }
+
+    void dispatch_mouse_event(const MouseEvent& event) override {
+        mouse_pos_ = event.screen_pos;
+        if (mouse_callback_) {
+            mouse_callback_(event);
+        }
+    }
+
+    void notify_hover(const HoverInfo& hover) override {
+        current_hover_ = hover;
+        if (hover_callback_) {
+            hover_callback_(hover);
+        }
+    }
+
+    [[nodiscard]] Point2I mouse_position() const noexcept override {
+        return mouse_pos_;
+    }
+
+    [[nodiscard]] const HoverInfo& current_hover() const noexcept override {
+        return current_hover_;
+    }
+
     [[nodiscard]] FrameBuffer& framebuffer() noexcept override { return framebuffer_; }
     [[nodiscard]] const FrameBuffer& framebuffer() const noexcept override { return framebuffer_; }
     [[nodiscard]] Viewport& viewport() noexcept override { return viewport_; }
@@ -53,6 +83,10 @@ private:
     Viewport viewport_;
     PipelineHooks hooks_;
     RenderCallback render_callback_;
+    Point2I mouse_pos_{-1, -1};
+    HoverInfo current_hover_{};
+    MouseCallback mouse_callback_;
+    HoverCallback hover_callback_;
 };
 
 #if !defined(_WIN32)
