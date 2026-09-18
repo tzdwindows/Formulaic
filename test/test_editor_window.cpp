@@ -8,10 +8,13 @@
 #include <Formulaic/render/viewport.hpp>
 #include <Formulaic/render/window_renderer.hpp>
 
+#include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <iostream>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #if defined(_WIN32)
@@ -23,6 +26,10 @@
 #endif
 #include <windows.h>
 #include <windowsx.h>
+#include <richedit.h>
+#include <commctrl.h>
+
+#pragma comment(lib, "comctl32.lib")
 
 #define TEST_ASSERT(cond, msg) \
     do { \
@@ -42,6 +49,7 @@ constexpr int IDC_BTN_PRESET3 = 1005;
 constexpr int IDC_BTN_PRESET4 = 1006;
 constexpr int IDC_STATUS_TEXT = 1007;
 constexpr int IDC_COMBO_MODE  = 1008;
+constexpr int IDC_AC_LIST     = 1009;
 
 constexpr UINT_PTR TIMER_ANIM_ID = 2001;
 
@@ -50,6 +58,128 @@ enum class PlotMode {
     Explicit1D,
     ScalarField2D,
     Implicit2D
+};
+
+struct AutocompleteItem {
+    std::string name;
+    std::string category;
+    bool is_func;
+};
+
+// Comprehensive mathematical catalog for autocomplete & syntax highlighting
+static const std::vector<AutocompleteItem> kCatalog = {
+    {"let", "keyword", false},
+    {"var", "keyword", false},
+    {"x", "var", false},
+    {"y", "var", false},
+    {"t", "var", false},
+    {"pi", "const", false},
+    {"e", "const", false},
+    {"tau", "const", false},
+    {"phi", "const", false},
+    {"euler", "const", false},
+    {"sqrt2", "const", false},
+    {"sqrt3", "const", false},
+    {"inf", "const", false},
+    {"sin", "trig", true},
+    {"cos", "trig", true},
+    {"tan", "trig", true},
+    {"asin", "trig", true},
+    {"acos", "trig", true},
+    {"atan", "trig", true},
+    {"atan2", "trig", true},
+    {"sec", "trig", true},
+    {"csc", "trig", true},
+    {"cot", "trig", true},
+    {"asec", "trig", true},
+    {"acsc", "trig", true},
+    {"acot", "trig", true},
+    {"sinh", "hyperb", true},
+    {"cosh", "hyperb", true},
+    {"tanh", "hyperb", true},
+    {"sech", "hyperb", true},
+    {"csch", "hyperb", true},
+    {"coth", "hyperb", true},
+    {"asinh", "hyperb", true},
+    {"acosh", "hyperb", true},
+    {"atanh", "hyperb", true},
+    {"exp", "exp/log", true},
+    {"exp2", "exp/log", true},
+    {"expm1", "exp/log", true},
+    {"ln", "exp/log", true},
+    {"log", "exp/log", true},
+    {"log10", "exp/log", true},
+    {"log2", "exp/log", true},
+    {"log1p", "exp/log", true},
+    {"pow", "exp/log", true},
+    {"sqrt", "math", true},
+    {"cbrt", "math", true},
+    {"abs", "math", true},
+    {"floor", "math", true},
+    {"ceil", "math", true},
+    {"round", "math", true},
+    {"trunc", "math", true},
+    {"frac", "math", true},
+    {"sign", "math", true},
+    {"copysign", "math", true},
+    {"hypot", "math", true},
+    {"min", "math", true},
+    {"max", "math", true},
+    {"clamp", "math", true},
+    {"lerp", "math", true},
+    {"step", "math", true},
+    {"smoothstep", "math", true},
+    {"sinc", "special", true},
+    {"erf", "special", true},
+    {"erfc", "special", true},
+    {"gamma", "special", true},
+    {"lgamma", "special", true},
+    {"beta", "special", true},
+    {"diff_step", "calculus", true},
+    {"diff_forward", "calculus", true},
+    {"diff_backward", "calculus", true},
+    {"diff2_step", "calculus", true},
+    {"curvature_2d", "calculus", true},
+    {"hann", "fft", true},
+    {"hamming", "fft", true},
+    {"blackman", "fft", true},
+    {"flattop", "fft", true},
+    {"welch", "fft", true},
+    {"square_wave", "signal", true},
+    {"sawtooth_wave", "signal", true},
+    {"triangle_wave", "signal", true},
+    {"chirp", "signal", true}
+};
+
+static bool is_catalog_function(std::string_view name) noexcept {
+    for (const auto& item : kCatalog) {
+        if (item.name == name && item.is_func) return true;
+    }
+    return false;
+}
+
+static bool is_catalog_constant(std::string_view name) noexcept {
+    for (const auto& item : kCatalog) {
+        if (item.name == name && item.category == "const") return true;
+    }
+    return false;
+}
+
+enum class EditorTokenType {
+    Default,
+    Comment,
+    Keyword,
+    Function,
+    Constant,
+    Variable,
+    Number,
+    Operator
+};
+
+struct EditorTokenSpan {
+    int start_pos;
+    int end_pos;
+    EditorTokenType tok_type;
 };
 
 struct EditorWindowState {
@@ -66,8 +196,17 @@ struct EditorWindowState {
     HWND hwnd_render{nullptr};
     HWND hwnd_combo_mode{nullptr};
 
+    HWND hwnd_ac_popup{nullptr};
+    HWND hwnd_ac_list{nullptr};
+    WNDPROC original_edit_proc{nullptr};
+    bool ac_visible{false};
+    int ac_prefix_start{0};
+    int ac_prefix_len{0};
+    bool is_highlighting{false};
+
     HBRUSH bg_brush{nullptr};
     HBRUSH edit_bg_brush{nullptr};
+    HBRUSH ac_bg_brush{nullptr};
     HFONT font_title{nullptr};
     HFONT font_mono{nullptr};
     HFONT font_ui{nullptr};
@@ -170,6 +309,385 @@ static LRESULT CALLBACK CanvasWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM
                 state->renderer->present();
             }
             EndPaint(hwnd, &ps);
+        }
+    }
+
+    return DefWindowProcA(hwnd, msg, wparam, lparam);
+}
+
+static void update_expression_from_edit(EditorWindowState* state);
+
+static std::vector<AutocompleteItem> find_autocomplete_matches(std::string_view prefix) {
+    std::vector<AutocompleteItem> results;
+    if (prefix.empty()) return results;
+
+    std::string lower_prefix;
+    lower_prefix.reserve(prefix.size());
+    for (char c : prefix) lower_prefix.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
+
+    for (const auto& item : kCatalog) {
+        std::string lower_name;
+        lower_name.reserve(item.name.size());
+        for (char c : item.name) lower_name.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
+
+        if (lower_name.rfind(lower_prefix, 0) == 0) { // starts with
+            results.push_back(item);
+        }
+    }
+    return results;
+}
+
+static std::vector<EditorTokenSpan> scan_syntax_tokens(std::string_view text) {
+    std::vector<EditorTokenSpan> tokens;
+    const int n = static_cast<int>(text.size());
+    int i = 0;
+
+    while (i < n) {
+        char c = text[i];
+
+        // 1. Line Comments: //
+        if (c == '/' && i + 1 < n && text[i + 1] == '/') {
+            int start = i;
+            while (i < n && text[i] != '\n' && text[i] != '\r') {
+                i++;
+            }
+            tokens.push_back({start, i, EditorTokenType::Comment});
+            continue;
+        }
+
+        // 2. Whitespace
+        if (std::isspace(static_cast<unsigned char>(c))) {
+            i++;
+            continue;
+        }
+
+        // 3. Numbers
+        if (std::isdigit(static_cast<unsigned char>(c)) || (c == '.' && i + 1 < n && std::isdigit(static_cast<unsigned char>(text[i + 1])))) {
+            int start = i;
+            while (i < n && (std::isdigit(static_cast<unsigned char>(text[i])) || text[i] == '.' || text[i] == 'e' || text[i] == 'E')) {
+                if ((text[i] == 'e' || text[i] == 'E') && i + 1 < n && (text[i + 1] == '+' || text[i + 1] == '-')) {
+                    i += 2;
+                } else {
+                    i++;
+                }
+            }
+            tokens.push_back({start, i, EditorTokenType::Number});
+            continue;
+        }
+
+        // 4. Identifiers (Keywords, Functions, Constants, Variables)
+        if (std::isalpha(static_cast<unsigned char>(c)) || c == '_') {
+            int start = i;
+            while (i < n && (std::isalnum(static_cast<unsigned char>(text[i])) || text[i] == '_')) {
+                i++;
+            }
+            std::string_view word = text.substr(start, i - start);
+            EditorTokenType tok_t = EditorTokenType::Variable;
+            if (word == "let" || word == "var") {
+                tok_t = EditorTokenType::Keyword;
+            } else if (is_catalog_constant(word)) {
+                tok_t = EditorTokenType::Constant;
+            } else if (is_catalog_function(word)) {
+                tok_t = EditorTokenType::Function;
+            }
+            tokens.push_back({start, i, tok_t});
+            continue;
+        }
+
+        // 5. Operators & Equations
+        if (c == '=' || c == '+' || c == '-' || c == '*' || c == '/' || c == '^' || c == '%' ||
+            c == '<' || c == '>' || c == '!' || c == ';' || c == ',') {
+            int start = i;
+            if ((c == '=' || c == '!' || c == '<' || c == '>') && i + 1 < n && text[i + 1] == '=') {
+                i += 2;
+            } else {
+                i++;
+            }
+            tokens.push_back({start, i, EditorTokenType::Operator});
+            continue;
+        }
+
+        // 6. Delimiters
+        i++;
+    }
+
+    return tokens;
+}
+
+static COLORREF get_token_color(EditorTokenType type) noexcept {
+    switch (type) {
+        case EditorTokenType::Comment:  return RGB(108, 112, 134); // Slate Gray
+        case EditorTokenType::Keyword:  return RGB(249, 226, 175); // Soft Gold / Yellow
+        case EditorTokenType::Function: return RGB(137, 220, 235); // Cyan
+        case EditorTokenType::Constant: return RGB(148, 226, 213); // Mint Teal
+        case EditorTokenType::Variable: return RGB(203, 166, 247); // Lavender / Mauve
+        case EditorTokenType::Number:   return RGB(250, 179, 135); // Peach / Orange
+        case EditorTokenType::Operator: return RGB(243, 139, 168); // Flamingo Pink
+        case EditorTokenType::Default:
+        default:                        return RGB(205, 214, 244); // Default Off-White
+    }
+}
+
+static void apply_syntax_highlighting(EditorWindowState* state) {
+    if (!state || !state->hwnd_edit || state->is_highlighting) return;
+    state->is_highlighting = true;
+
+    int len = GetWindowTextLengthA(state->hwnd_edit);
+    if (len <= 0) {
+        state->is_highlighting = false;
+        return;
+    }
+
+    std::string text(len + 1, '\0');
+    GetWindowTextA(state->hwnd_edit, text.data(), len + 1);
+    text.resize(len);
+
+    CHARRANGE saved_sel{};
+    SendMessageA(state->hwnd_edit, EM_EXGETSEL, 0, reinterpret_cast<LPARAM>(&saved_sel));
+    POINT scroll_pos{};
+    SendMessageA(state->hwnd_edit, EM_GETSCROLLPOS, 0, reinterpret_cast<LPARAM>(&scroll_pos));
+
+    // Freeze repainting during format update
+    SendMessageA(state->hwnd_edit, WM_SETREDRAW, FALSE, 0);
+
+    // Reset whole text to default color
+    CHARRANGE all_range{0, len};
+    SendMessageA(state->hwnd_edit, EM_EXSETSEL, 0, reinterpret_cast<LPARAM>(&all_range));
+    CHARFORMAT2A cf{};
+    cf.cbSize = sizeof(cf);
+    cf.dwMask = CFM_COLOR;
+    cf.crTextColor = RGB(205, 214, 244);
+    SendMessageA(state->hwnd_edit, EM_SETCHARFORMAT, SCF_SELECTION, reinterpret_cast<LPARAM>(&cf));
+
+    // Tokenize and format colored tokens
+    auto tokens = scan_syntax_tokens(text);
+    for (const auto& tok : tokens) {
+        COLORREF color = get_token_color(tok.tok_type);
+        if (color == RGB(205, 214, 244)) continue;
+
+        CHARRANGE token_range{tok.start_pos, tok.end_pos};
+        SendMessageA(state->hwnd_edit, EM_EXSETSEL, 0, reinterpret_cast<LPARAM>(&token_range));
+        CHARFORMAT2A cf_tok{};
+        cf_tok.cbSize = sizeof(cf_tok);
+        cf_tok.dwMask = CFM_COLOR;
+        cf_tok.crTextColor = color;
+        SendMessageA(state->hwnd_edit, EM_SETCHARFORMAT, SCF_SELECTION, reinterpret_cast<LPARAM>(&cf_tok));
+    }
+
+    // Restore caret selection and scroll
+    SendMessageA(state->hwnd_edit, EM_EXSETSEL, 0, reinterpret_cast<LPARAM>(&saved_sel));
+    SendMessageA(state->hwnd_edit, EM_SETSCROLLPOS, 0, reinterpret_cast<LPARAM>(&scroll_pos));
+
+    // Unfreeze and redraw
+    SendMessageA(state->hwnd_edit, WM_SETREDRAW, TRUE, 0);
+    InvalidateRect(state->hwnd_edit, nullptr, FALSE);
+
+    state->is_highlighting = false;
+}
+
+static void hide_autocomplete(EditorWindowState* state) {
+    if (state && state->ac_visible && state->hwnd_ac_popup) {
+        ShowWindow(state->hwnd_ac_popup, SW_HIDE);
+        state->ac_visible = false;
+    }
+}
+
+static void accept_autocomplete(EditorWindowState* state) {
+    if (!state || !state->ac_visible || !state->hwnd_ac_list) return;
+
+    int sel = static_cast<int>(SendMessageA(state->hwnd_ac_list, LB_GETCURSEL, 0, 0));
+    if (sel < 0) return;
+
+    char buf[128]{};
+    SendMessageA(state->hwnd_ac_list, LB_GETTEXT, sel, reinterpret_cast<LPARAM>(buf));
+
+    std::string item_str(buf);
+    size_t space_pos = item_str.find(' ');
+    std::string clean_name = (space_pos != std::string::npos) ? item_str.substr(0, space_pos) : item_str;
+
+    bool is_func = false;
+    if (clean_name.length() > 2 && clean_name.substr(clean_name.length() - 2) == "()") {
+        clean_name = clean_name.substr(0, clean_name.length() - 2);
+        is_func = true;
+    } else if (is_catalog_function(clean_name)) {
+        is_func = true;
+    }
+
+    // Replace the prefix
+    CHARRANGE cr{state->ac_prefix_start, state->ac_prefix_start + state->ac_prefix_len};
+    SendMessageA(state->hwnd_edit, EM_EXSETSEL, 0, reinterpret_cast<LPARAM>(&cr));
+
+    std::string insertion = clean_name;
+    if (is_func) {
+        insertion += "()";
+    }
+    SendMessageA(state->hwnd_edit, EM_REPLACESEL, TRUE, reinterpret_cast<LPARAM>(insertion.c_str()));
+
+    if (is_func) {
+        // Place caret inside the parentheses: sin(|)
+        int inside_pos = state->ac_prefix_start + static_cast<int>(clean_name.length()) + 1;
+        CHARRANGE inside_cr{inside_pos, inside_pos};
+        SendMessageA(state->hwnd_edit, EM_EXSETSEL, 0, reinterpret_cast<LPARAM>(&inside_cr));
+    }
+
+    hide_autocomplete(state);
+    apply_syntax_highlighting(state);
+    update_expression_from_edit(state);
+}
+
+static void trigger_autocomplete_check(EditorWindowState* state) {
+    if (!state || !state->hwnd_edit || state->is_highlighting) return;
+
+    CHARRANGE sel{};
+    SendMessageA(state->hwnd_edit, EM_EXGETSEL, 0, reinterpret_cast<LPARAM>(&sel));
+    if (sel.cpMin != sel.cpMax) {
+        hide_autocomplete(state);
+        return;
+    }
+
+    int caret = sel.cpMin;
+    if (caret <= 0) {
+        hide_autocomplete(state);
+        return;
+    }
+
+    int len = GetWindowTextLengthA(state->hwnd_edit);
+    if (len <= 0) {
+        hide_autocomplete(state);
+        return;
+    }
+
+    std::string text(len + 1, '\0');
+    GetWindowTextA(state->hwnd_edit, text.data(), len + 1);
+    text.resize(len);
+
+    int word_start = caret;
+    while (word_start > 0) {
+        char prev = text[word_start - 1];
+        if (std::isalnum(static_cast<unsigned char>(prev)) || prev == '_') {
+            word_start--;
+        } else {
+            break;
+        }
+    }
+
+    int prefix_len = caret - word_start;
+    if (prefix_len < 1) {
+        hide_autocomplete(state);
+        return;
+    }
+
+    std::string prefix = text.substr(word_start, prefix_len);
+    auto matches = find_autocomplete_matches(prefix);
+    if (matches.empty()) {
+        hide_autocomplete(state);
+        return;
+    }
+
+    // Populate listbox
+    SendMessageA(state->hwnd_ac_list, LB_RESETCONTENT, 0, 0);
+    for (const auto& item : matches) {
+        std::string display = item.name + (item.is_func ? "()" : "") + "  [" + item.category + "]";
+        SendMessageA(state->hwnd_ac_list, LB_ADDSTRING, 0, reinterpret_cast<LPARAM>(display.c_str()));
+    }
+    SendMessageA(state->hwnd_ac_list, LB_SETCURSEL, 0, 0);
+
+    // Compute caret coordinates in screen space
+    POINTL pt{};
+    SendMessageA(state->hwnd_edit, EM_POSFROMCHAR, reinterpret_cast<WPARAM>(&pt), caret);
+    POINT screen_pt{pt.x, pt.y};
+    ClientToScreen(state->hwnd_edit, &screen_pt);
+
+    int count = static_cast<int>(matches.size());
+    int popup_height = std::clamp(count * 20 + 8, 40, 160);
+
+    SetWindowPos(state->hwnd_ac_popup, HWND_TOP, screen_pt.x, screen_pt.y + 20, 230, popup_height, SWP_SHOWWINDOW | SWP_NOACTIVATE);
+
+    state->ac_visible = true;
+    state->ac_prefix_start = word_start;
+    state->ac_prefix_len = prefix_len;
+}
+
+static LRESULT CALLBACK EditSubclassProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
+    auto* state = reinterpret_cast<EditorWindowState*>(GetWindowLongPtrA(hwnd, GWLP_USERDATA));
+    if (!state) return DefWindowProcA(hwnd, msg, wparam, lparam);
+
+    switch (msg) {
+        case WM_KEYDOWN: {
+            if (state->ac_visible && state->hwnd_ac_popup && IsWindowVisible(state->hwnd_ac_popup)) {
+                if (wparam == VK_DOWN) {
+                    int cur = static_cast<int>(SendMessageA(state->hwnd_ac_list, LB_GETCURSEL, 0, 0));
+                    int count = static_cast<int>(SendMessageA(state->hwnd_ac_list, LB_GETCOUNT, 0, 0));
+                    if (cur < count - 1) {
+                        SendMessageA(state->hwnd_ac_list, LB_SETCURSEL, cur + 1, 0);
+                    }
+                    return 0;
+                }
+                if (wparam == VK_UP) {
+                    int cur = static_cast<int>(SendMessageA(state->hwnd_ac_list, LB_GETCURSEL, 0, 0));
+                    if (cur > 0) {
+                        SendMessageA(state->hwnd_ac_list, LB_SETCURSEL, cur - 1, 0);
+                    }
+                    return 0;
+                }
+                if (wparam == VK_RETURN || wparam == VK_TAB) {
+                    accept_autocomplete(state);
+                    return 0;
+                }
+                if (wparam == VK_ESCAPE) {
+                    hide_autocomplete(state);
+                    return 0;
+                }
+            }
+            break;
+        }
+
+        case WM_CHAR: {
+            LRESULT res = CallWindowProcA(state->original_edit_proc, hwnd, msg, wparam, lparam);
+            if (wparam == VK_ESCAPE || wparam == VK_RETURN) {
+                hide_autocomplete(state);
+                return res;
+            }
+            trigger_autocomplete_check(state);
+            return res;
+        }
+
+        case WM_LBUTTONDOWN:
+        case WM_KILLFOCUS: {
+            hide_autocomplete(state);
+            break;
+        }
+    }
+
+    return CallWindowProcA(state->original_edit_proc, hwnd, msg, wparam, lparam);
+}
+
+static LRESULT CALLBACK AutocompleteWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
+    auto* state = reinterpret_cast<EditorWindowState*>(GetWindowLongPtrA(hwnd, GWLP_USERDATA));
+
+    switch (msg) {
+        case WM_COMMAND: {
+            if (HIWORD(wparam) == LBN_DBLCLK && state) {
+                accept_autocomplete(state);
+                return 0;
+            }
+            break;
+        }
+
+        case WM_CTLCOLORLISTBOX: {
+            HDC hdc = reinterpret_cast<HDC>(wparam);
+            SetBkColor(hdc, RGB(30, 30, 46));
+            SetTextColor(hdc, RGB(205, 214, 244));
+            if (state && state->ac_bg_brush) {
+                return reinterpret_cast<LRESULT>(state->ac_bg_brush);
+            }
+            break;
+        }
+
+        case WM_SIZE: {
+            if (state && state->hwnd_ac_list) {
+                MoveWindow(state->hwnd_ac_list, 0, 0, LOWORD(lparam), HIWORD(lparam), TRUE);
+            }
             return 0;
         }
     }
@@ -195,26 +713,44 @@ static void update_expression_from_edit(EditorWindowState* state) {
         return;
     }
 
-    // Check if user entered an equation LHS = RHS (excluding let/var declarations)
+    // Check if user entered an equation LHS = RHS (single-line or multi-line declarations ending in an equation)
     bool is_equation = false;
     std::string eq_lhs, eq_rhs;
-    {
-        size_t start_idx = 0;
-        while (start_idx < text.size() && (text[start_idx] == ' ' || text[start_idx] == '\t' || text[start_idx] == '\r' || text[start_idx] == '\n')) ++start_idx;
-        std::string_view prefix = std::string_view(text).substr(start_idx, 4);
-        if (prefix != "let " && prefix != "var ") {
-            int paren = 0;
-            for (size_t p = 0; p < text.size(); ++p) {
-                if (text[p] == '(') ++paren;
-                else if (text[p] == ')') { if (paren > 0) --paren; }
-                else if (paren == 0 && text[p] == '=') {
-                    if (p > 0 && (text[p-1] == '!' || text[p-1] == '<' || text[p-1] == '>')) continue;
-                    size_t eq_len = (p + 1 < text.size() && text[p+1] == '=') ? 2 : 1;
-                    eq_lhs = text.substr(0, p);
-                    eq_rhs = text.substr(p + eq_len);
-                    is_equation = true;
-                    break;
-                }
+    std::string prefix_stmts;
+
+    std::string trimmed_text = text;
+    while (!trimmed_text.empty() && (trimmed_text.back() == ' ' || trimmed_text.back() == '\t' || trimmed_text.back() == '\r' || trimmed_text.back() == '\n' || trimmed_text.back() == ';')) {
+        trimmed_text.pop_back();
+    }
+
+    size_t last_semi = std::string::npos;
+    int paren_cnt = 0;
+    for (size_t i = 0; i < trimmed_text.size(); ++i) {
+        if (trimmed_text[i] == '(') ++paren_cnt;
+        else if (trimmed_text[i] == ')') { if (paren_cnt > 0) --paren_cnt; }
+        else if (trimmed_text[i] == ';' && paren_cnt == 0) {
+            last_semi = i;
+        }
+    }
+
+    prefix_stmts = (last_semi != std::string::npos) ? trimmed_text.substr(0, last_semi + 1) + "\n" : "";
+    std::string last_stmt = (last_semi != std::string::npos) ? trimmed_text.substr(last_semi + 1) : trimmed_text;
+
+    size_t s_idx = 0;
+    while (s_idx < last_stmt.size() && (last_stmt[s_idx] == ' ' || last_stmt[s_idx] == '\t' || last_stmt[s_idx] == '\r' || last_stmt[s_idx] == '\n')) ++s_idx;
+    std::string_view prefix = std::string_view(last_stmt).substr(s_idx, 4);
+    if (prefix != "let " && prefix != "var ") {
+        int p_depth = 0;
+        for (size_t p = 0; p < last_stmt.size(); ++p) {
+            if (last_stmt[p] == '(') ++p_depth;
+            else if (last_stmt[p] == ')') { if (p_depth > 0) --p_depth; }
+            else if (p_depth == 0 && last_stmt[p] == '=') {
+                if (p > 0 && (last_stmt[p-1] == '!' || last_stmt[p-1] == '<' || last_stmt[p-1] == '>')) continue;
+                size_t eq_len = (p + 1 < last_stmt.size() && last_stmt[p+1] == '=') ? 2 : 1;
+                eq_lhs = last_stmt.substr(0, p);
+                eq_rhs = last_stmt.substr(p + eq_len);
+                is_equation = true;
+                break;
             }
         }
     }
@@ -232,7 +768,8 @@ static void update_expression_from_edit(EditorWindowState* state) {
 
         // Special case: y = f(x) -> 1D explicit curve
         if (eq_lhs == "y") {
-            auto rhs_res = formulaic::Expression::parse(eq_rhs);
+            std::string expr_candidate = prefix_stmts + eq_rhs + ";";
+            auto rhs_res = formulaic::Expression::parse(expr_candidate);
             if (rhs_res.has_value() && !rhs_res->references_variable("y")) {
                 parse_res = std::move(rhs_res);
                 state->plot_mode = PlotMode::Explicit1D;
@@ -240,7 +777,8 @@ static void update_expression_from_edit(EditorWindowState* state) {
                     SendMessageA(state->hwnd_combo_mode, CB_SETCURSEL, static_cast<WPARAM>(PlotMode::Explicit1D), 0);
                 }
             } else {
-                parse_res = formulaic::Expression::parse_equation(text);
+                std::string implicit_script = prefix_stmts + "(" + eq_lhs + ") - (" + eq_rhs + ");";
+                parse_res = formulaic::Expression::parse(implicit_script);
                 state->plot_mode = PlotMode::Implicit2D;
                 if (state->hwnd_combo_mode) {
                     SendMessageA(state->hwnd_combo_mode, CB_SETCURSEL, static_cast<WPARAM>(PlotMode::Implicit2D), 0);
@@ -248,7 +786,8 @@ static void update_expression_from_edit(EditorWindowState* state) {
             }
         } else {
             // General equation: LHS = RHS -> implicit (LHS) - (RHS) = 0
-            parse_res = formulaic::Expression::parse_equation(text);
+            std::string implicit_script = prefix_stmts + "(" + eq_lhs + ") - (" + eq_rhs + ");";
+            parse_res = formulaic::Expression::parse(implicit_script);
             state->plot_mode = PlotMode::Implicit2D;
             if (state->hwnd_combo_mode) {
                 SendMessageA(state->hwnd_combo_mode, CB_SETCURSEL, static_cast<WPARAM>(PlotMode::Implicit2D), 0);
@@ -308,12 +847,18 @@ static LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
             WORD code = HIWORD(wparam);
 
             if (id == IDC_EDIT_EXPR && code == EN_CHANGE) {
-                update_expression_from_edit(state);
+                if (state && !state->is_highlighting) {
+                    update_expression_from_edit(state);
+                    apply_syntax_highlighting(state);
+                }
                 return 0;
             }
 
             if (id == IDC_BTN_RENDER && code == BN_CLICKED) {
-                update_expression_from_edit(state);
+                if (state) {
+                    update_expression_from_edit(state);
+                    apply_syntax_highlighting(state);
+                }
                 return 0;
             }
 
@@ -335,6 +880,7 @@ static LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
                 SetWindowTextA(state->hwnd_edit, s);
                 SendMessageA(state->hwnd_combo_mode, CB_SETCURSEL, static_cast<WPARAM>(PlotMode::Auto), 0);
                 state->plot_mode = PlotMode::Auto;
+                apply_syntax_highlighting(state);
                 update_expression_from_edit(state);
                 return 0;
             }
@@ -344,6 +890,7 @@ static LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
                 SetWindowTextA(state->hwnd_edit, s);
                 SendMessageA(state->hwnd_combo_mode, CB_SETCURSEL, static_cast<WPARAM>(PlotMode::Auto), 0);
                 state->plot_mode = PlotMode::Auto;
+                apply_syntax_highlighting(state);
                 update_expression_from_edit(state);
                 return 0;
             }
@@ -353,15 +900,17 @@ static LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
                 SetWindowTextA(state->hwnd_edit, s);
                 SendMessageA(state->hwnd_combo_mode, CB_SETCURSEL, static_cast<WPARAM>(PlotMode::Auto), 0);
                 state->plot_mode = PlotMode::Auto;
+                apply_syntax_highlighting(state);
                 update_expression_from_edit(state);
                 return 0;
             }
 
             if (id == IDC_BTN_PRESET4 && code == BN_CLICKED) {
-                const char* s = "let r = hypot(x, y);\nr - 3.0 - 0.4 * sin(7.0 * atan2(y, x) + 2.0 * t);";
+                const char* s = "let r = hypot(x, y);\nr - 3.0 - 0.4 * sin(7.0 * atan2(y, x) + 2.0 * t) = 0";
                 SetWindowTextA(state->hwnd_edit, s);
                 SendMessageA(state->hwnd_combo_mode, CB_SETCURSEL, static_cast<WPARAM>(PlotMode::Implicit2D), 0);
                 state->plot_mode = PlotMode::Implicit2D;
+                apply_syntax_highlighting(state);
                 update_expression_from_edit(state);
                 return 0;
             }
@@ -451,6 +1000,9 @@ int main(int argc, char* argv[]) {
     }
 
 #if defined(_WIN32)
+    HMODULE hRich = LoadLibraryA("riched20.dll");
+    const char* edit_class_name = (hRich != nullptr) ? "RichEdit20A" : "EDIT";
+
     HINSTANCE hinstance = GetModuleHandle(nullptr);
 
     // 1. Register main split window class
@@ -477,10 +1029,23 @@ int main(int argc, char* argv[]) {
     wc_canvas.lpszClassName = kCanvasClass;
     RegisterClassExA(&wc_canvas);
 
-    // 3. Initialize state
+    // 3. Register autocomplete popup window class
+    const char* kAcPopupClass = "FormulaicAutocompletePopup";
+    WNDCLASSEXA wc_ac{};
+    wc_ac.cbSize = sizeof(WNDCLASSEXA);
+    wc_ac.style = CS_HREDRAW | CS_VREDRAW;
+    wc_ac.lpfnWndProc = AutocompleteWndProc;
+    wc_ac.hInstance = hinstance;
+    wc_ac.hCursor = LoadCursor(nullptr, IDC_ARROW);
+    wc_ac.hbrBackground = CreateSolidBrush(RGB(30, 30, 46));
+    wc_ac.lpszClassName = kAcPopupClass;
+    RegisterClassExA(&wc_ac);
+
+    // 4. Initialize state
     auto state = std::make_unique<EditorWindowState>();
     state->bg_brush = CreateSolidBrush(RGB(20, 20, 28));
-    state->edit_bg_brush = CreateSolidBrush(RGB(26, 26, 36));
+    state->edit_bg_brush = CreateSolidBrush(RGB(24, 24, 37));
+    state->ac_bg_brush = CreateSolidBrush(RGB(30, 30, 46));
     state->font_title = CreateFontA(20, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE, ANSI_CHARSET, 0, 0, CLEARTYPE_QUALITY, 0, "Segoe UI");
     state->font_mono  = CreateFontA(16, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, ANSI_CHARSET, 0, 0, CLEARTYPE_QUALITY, FIXED_PITCH, "Consolas");
     state->font_ui    = CreateFontA(14, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, ANSI_CHARSET, 0, 0, CLEARTYPE_QUALITY, 0, "Segoe UI");
@@ -510,7 +1075,7 @@ int main(int argc, char* argv[]) {
     SendMessageA(lbl_title, WM_SETFONT, reinterpret_cast<WPARAM>(state->font_title), TRUE);
 
     // Instruction label
-    HWND lbl_inst = CreateWindowExA(0, "STATIC", "Supports let/var, multi-line scripts, calculus & FFT builtins:", WS_CHILD | WS_VISIBLE, 15, 40, left_w, 18, hwnd_main, nullptr, hinstance, nullptr);
+    HWND lbl_inst = CreateWindowExA(0, "STATIC", "Syntax Highlighting & Autocomplete (Type 'sin', 'let', 'diff'):", WS_CHILD | WS_VISIBLE, 15, 40, left_w, 18, hwnd_main, nullptr, hinstance, nullptr);
     SendMessageA(lbl_inst, WM_SETFONT, reinterpret_cast<WPARAM>(state->font_ui), TRUE);
 
     // Multi-line Edit Box
@@ -522,7 +1087,7 @@ int main(int argc, char* argv[]) {
 
     state->hwnd_edit = CreateWindowExA(
         WS_EX_CLIENTEDGE,
-        "EDIT",
+        edit_class_name,
         initial_script.c_str(),
         WS_CHILD | WS_VISIBLE | WS_VSCROLL | ES_MULTILINE | ES_AUTOVSCROLL | ES_WANTRETURN,
         15, 65, left_w, 180,
@@ -531,6 +1096,39 @@ int main(int argc, char* argv[]) {
         hinstance, nullptr
     );
     SendMessageA(state->hwnd_edit, WM_SETFONT, reinterpret_cast<WPARAM>(state->font_mono), TRUE);
+    SendMessageA(state->hwnd_edit, EM_SETBKGNDCOLOR, 0, RGB(24, 24, 37));
+    SendMessageA(state->hwnd_edit, EM_SETMARGINS, EC_LEFTMARGIN | EC_RIGHTMARGIN, MAKELPARAM(8, 8));
+
+    // Subclass edit control for autocomplete navigation
+    SetWindowLongPtrA(state->hwnd_edit, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(state.get()));
+    state->original_edit_proc = reinterpret_cast<WNDPROC>(SetWindowLongPtrA(state->hwnd_edit, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(EditSubclassProc)));
+
+    // Create autocomplete floating popup window
+    state->hwnd_ac_popup = CreateWindowExA(
+        WS_EX_TOPMOST | WS_EX_TOOLWINDOW,
+        kAcPopupClass,
+        "",
+        WS_POPUP | WS_BORDER,
+        0, 0, 230, 140,
+        hwnd_main,
+        nullptr,
+        hinstance,
+        nullptr
+    );
+    SetWindowLongPtrA(state->hwnd_ac_popup, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(state.get()));
+
+    state->hwnd_ac_list = CreateWindowExA(
+        0,
+        "LISTBOX",
+        "",
+        WS_CHILD | WS_VISIBLE | WS_VSCROLL | LBS_NOTIFY | LBS_HASSTRINGS | LBS_WANTKEYBOARDINPUT,
+        0, 0, 230, 140,
+        state->hwnd_ac_popup,
+        reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_AC_LIST)),
+        hinstance,
+        nullptr
+    );
+    SendMessageA(state->hwnd_ac_list, WM_SETFONT, reinterpret_cast<WPARAM>(state->font_mono), TRUE);
 
     // Render / Update Button
     HWND btn_render = CreateWindowExA(0, "BUTTON", "Update & Render Expression", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 15, 255, left_w, 32, hwnd_main, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_BTN_RENDER)), hinstance, nullptr);
@@ -570,47 +1168,49 @@ int main(int argc, char* argv[]) {
                        "- Left Click + Drag: Pan coordinate viewport\n"
                        "- Mouse Wheel: Zoom in / out at mouse cursor\n"
                        "- Double Click: Reset viewport to [-5, 5]\n"
-                       "- Animation active when 't' is referenced";
+                       "- Autocomplete: Type 'sin', 'diff' + Tab/Enter";
     HWND lbl_tips = CreateWindowExA(0, "STATIC", tips.c_str(), WS_CHILD | WS_VISIBLE, 15, 500, left_w, 90, hwnd_main, nullptr, hinstance, nullptr);
     SendMessageA(lbl_tips, WM_SETFONT, reinterpret_cast<WPARAM>(state->font_ui), TRUE);
 
-    // Right Canvas Window
-    int canvas_x = left_w + 30;
-    int canvas_w = init_win_w - canvas_x - 30;
-    int canvas_h = init_win_h - 60;
-
-    state->hwnd_render = CreateWindowExA(
-        WS_EX_CLIENTEDGE,
+    // Right Canvas Viewport
+    constexpr int canvas_x = 440;
+    HWND hwnd_render = CreateWindowExA(
+        0,
         kCanvasClass,
-        "Formulaic Canvas",
+        "",
         WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN,
-        canvas_x, 15, canvas_w, canvas_h,
+        canvas_x, 0, init_win_w - canvas_x, init_win_h,
         hwnd_main,
-        nullptr,
-        hinstance,
-        nullptr
+        reinterpret_cast<HMENU>(static_cast<INT_PTR>(2000)),
+        hinstance, nullptr
     );
-    TEST_ASSERT(state->hwnd_render != nullptr, "Created child render canvas HWND");
-    SetWindowLongPtrA(state->hwnd_render, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(state.get()));
+    TEST_ASSERT(hwnd_render != nullptr, "Created render viewport canvas HWND");
+    state->hwnd_render = hwnd_render;
+    SetWindowLongPtrA(hwnd_render, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(state.get()));
 
-    // Initialize Window Renderer attached to the child canvas HWND
+    // Create & attach window renderer
     state->renderer = formulaic::create_window_renderer();
-    TEST_ASSERT(state->renderer != nullptr, "Created WindowRenderer");
-    bool attached = state->renderer->attach(reinterpret_cast<void*>(state->hwnd_render));
-    TEST_ASSERT(attached, "Renderer attached to child canvas HWND");
+    TEST_ASSERT(state->renderer != nullptr, "Created window renderer");
+    bool attached = state->renderer->attach(reinterpret_cast<void*>(hwnd_render));
+    TEST_ASSERT(attached, "Attached window renderer to canvas HWND");
 
-    // Setup custom render callback
-    state->renderer->set_render_callback([s = state.get()](formulaic::FrameBuffer& fb, const formulaic::Viewport& vp, double time_t) {
+    // Configure render callback
+    EditorWindowState* s = state.get();
+    state->renderer->set_render_callback([s](formulaic::FrameBuffer& fb, const formulaic::Viewport& vp, double time_t) {
         fb.clear(formulaic::Color::BackgroundDark);
 
-        formulaic::GridStyle grid_style;
-        grid_style.background_color = formulaic::Color::BackgroundDark;
-        grid_style.show_grid = true;
-        grid_style.show_axes = true;
-        grid_style.show_labels = true;
-        s->engine.render_grid(fb, vp, grid_style);
+        formulaic::GridStyle style;
+        style.show_grid = true;
+        style.show_axes = true;
+        style.show_labels = true;
+        style.background_color = formulaic::Color::BackgroundDark;
+        s->engine.render_grid(fb, vp, style);
 
-        if (!s->is_valid_expr) return;
+        if (!s->is_valid_expr) {
+            fb.draw_text(20, 30, "Syntax / Semantic Error:", formulaic::Color::NeonPink);
+            fb.draw_text(20, 50, s->error_message, formulaic::Color::White);
+            return;
+        }
 
         PlotMode mode = s->plot_mode;
         if (mode == PlotMode::Auto) {
@@ -639,7 +1239,8 @@ int main(int argc, char* argv[]) {
     // Start 60 FPS animation timer
     SetTimer(hwnd_main, TIMER_ANIM_ID, 16, nullptr);
 
-    // Initial parse & render
+    // Initial highlight, parse & render
+    apply_syntax_highlighting(state.get());
     update_expression_from_edit(state.get());
 
     if (!is_automated) {
@@ -647,7 +1248,8 @@ int main(int argc, char* argv[]) {
         UpdateWindow(hwnd_main);
 
         std::cout << "\n[Interactive Mode Running]\n";
-        std::cout << "-> Left panel: type math scripts, use 'let'/'var', calculus & FFT functions.\n";
+        std::cout << "-> Left panel: syntax highlighting & autocomplete active.\n";
+        std::cout << "-> Type 'sin', 'diff_step', 'let' to test autocomplete.\n";
         std::cout << "-> Right panel: real-time rendered math canvas.\n";
         std::cout << "-> Close window or press Alt+F4 to exit.\n\n";
 
@@ -664,43 +1266,77 @@ int main(int argc, char* argv[]) {
         TEST_ASSERT(state->renderer->framebuffer().width() > 0, "Framebuffer has valid width");
         TEST_ASSERT(state->renderer->framebuffer().height() > 0, "Framebuffer has valid height");
 
-        // Verification 2: Test syntax error diagnostics
+        // Verification 2: Test syntax highlighting scanner
+        auto tokens = scan_syntax_tokens("let r = hypot(x, y); sin(r) * 2.5;");
+        TEST_ASSERT(!tokens.empty(), "Syntax scanner produced tokens");
+        bool has_let = false, has_hypot = false, has_num = false;
+        for (const auto& tok : tokens) {
+            if (tok.tok_type == EditorTokenType::Keyword) has_let = true;
+            if (tok.tok_type == EditorTokenType::Function) has_hypot = true;
+            if (tok.tok_type == EditorTokenType::Number) has_num = true;
+        }
+        TEST_ASSERT(has_let, "Scanner identified keyword 'let'");
+        TEST_ASSERT(has_hypot, "Scanner identified function 'hypot'");
+        TEST_ASSERT(has_num, "Scanner identified number '2.5'");
+
+        // Verification 3: Test autocomplete catalog lookup
+        auto ac_sin = find_autocomplete_matches("si");
+        TEST_ASSERT(!ac_sin.empty(), "Autocomplete found matches for 'si'");
+        TEST_ASSERT(ac_sin[0].name == "sin", "First match for 'si' is 'sin'");
+
+        auto ac_hyp = find_autocomplete_matches("hy");
+        TEST_ASSERT(!ac_hyp.empty(), "Autocomplete found matches for 'hy'");
+        TEST_ASSERT(ac_hyp[0].name == "hypot", "Match for 'hy' is 'hypot'");
+
+        auto ac_diff = find_autocomplete_matches("di");
+        TEST_ASSERT(!ac_diff.empty(), "Autocomplete found matches for 'di'");
+        TEST_ASSERT(ac_diff[0].name == "diff_step", "First match for 'di' is 'diff_step'");
+
+        // Verification 4: Test syntax error diagnostics
         SetWindowTextA(state->hwnd_edit, "sin(x +");
         update_expression_from_edit(state.get());
         TEST_ASSERT(!state->is_valid_expr, "Syntax error identified");
         TEST_ASSERT(!state->error_message.empty(), "Error message populated");
 
-        // Verification 3: Test preset 1 (let / var)
+        // Verification 5: Test preset 1 (let / var)
         SendMessageA(hwnd_main, WM_COMMAND, MAKEWPARAM(IDC_BTN_PRESET1, BN_CLICKED), 0);
         TEST_ASSERT(state->is_valid_expr, "Preset 1 is valid");
 
-        // Verification 4: Test preset 2 (calculus diff_step)
+        // Verification 6: Test preset 2 (calculus diff_step)
         SendMessageA(hwnd_main, WM_COMMAND, MAKEWPARAM(IDC_BTN_PRESET2, BN_CLICKED), 0);
         TEST_ASSERT(state->is_valid_expr, "Preset 2 is valid");
 
-        // Verification 5: Test preset 3 (FFT windowing)
+        // Verification 7: Test preset 3 (FFT windowing)
         SendMessageA(hwnd_main, WM_COMMAND, MAKEWPARAM(IDC_BTN_PRESET3, BN_CLICKED), 0);
         TEST_ASSERT(state->is_valid_expr, "Preset 3 is valid");
 
-        // Verification 6: Test preset 4 (implicit function)
+        // Verification 8: Test preset 4 (implicit function)
         SendMessageA(hwnd_main, WM_COMMAND, MAKEWPARAM(IDC_BTN_PRESET4, BN_CLICKED), 0);
         TEST_ASSERT(state->is_valid_expr, "Preset 4 is valid");
         TEST_ASSERT(state->plot_mode == PlotMode::Implicit2D, "Plot mode set to Implicit2D");
 
-        std::cout << "All split-window interactive GUI & render assertions PASSED successfully!\n";
+        std::cout << "All split-window interactive GUI, syntax highlighting & autocomplete assertions PASSED!\n";
     }
 
     // Cleanup Win32 resources
     if (state->bg_brush) DeleteObject(state->bg_brush);
     if (state->edit_bg_brush) DeleteObject(state->edit_bg_brush);
+    if (state->ac_bg_brush) DeleteObject(state->ac_bg_brush);
     if (state->font_title) DeleteObject(state->font_title);
     if (state->font_mono) DeleteObject(state->font_mono);
     if (state->font_ui) DeleteObject(state->font_ui);
 
+    if (state->hwnd_ac_popup) {
+        DestroyWindow(state->hwnd_ac_popup);
+    }
     if (state->renderer) {
         state->renderer->detach();
     }
     DestroyWindow(hwnd_main);
+
+    if (hRich) {
+        FreeLibrary(hRich);
+    }
 
 #else
     std::cout << "Split window editor requires Win32 GUI subsystem.\n";

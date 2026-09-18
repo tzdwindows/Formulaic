@@ -449,10 +449,19 @@ void FrameBuffer::draw_rounded_rect(int x, int y, int w, int h, int radius, Colo
 void FrameBuffer::draw_text(int x, int y, std::string_view text, Color color, int scale) noexcept {
     scale = std::max(1, scale);
     int cur_x = x;
+    int cur_y = y;
 
     for (char c : text) {
+        if (c == '\r') {
+            continue;
+        }
+        if (c == '\n') {
+            cur_x = x;
+            cur_y += (7 + 3) * scale;
+            continue;
+        }
         if (c < 32 || c > 126) {
-            c = '?';
+            c = ' ';
         }
         const auto& glyph = kFont5x7[c - 32];
         for (int col = 0; col < 5; ++col) {
@@ -460,9 +469,9 @@ void FrameBuffer::draw_text(int x, int y, std::string_view text, Color color, in
             for (int row = 0; row < 7; ++row) {
                 if (bits & (1 << row)) {
                     if (scale == 1) {
-                        set_pixel(cur_x + col, y + row, color);
+                        set_pixel(cur_x + col, cur_y + row, color);
                     } else {
-                        fill_rect(cur_x + col * scale, y + row * scale, scale, scale, color);
+                        fill_rect(cur_x + col * scale, cur_y + row * scale, scale, scale, color);
                     }
                 }
             }

@@ -83,9 +83,13 @@ static bool render_custom_formula_to_image(
         engine.plot_explicit(fb, vp, expr, formulaic::Color::NeonBlue, 2.5);
     }
 
-    // Watermark title
-    std::string title = "Formulaic Custom Input: " + formula_text.substr(0, 45);
-    if (formula_text.length() > 45) title += "...";
+    // Watermark title - sanitize newlines and control characters to avoid any display glitches
+    std::string clean_title = formula_text;
+    for (char& ch : clean_title) {
+        if (ch == '\n' || ch == '\r' || ch == '\t') ch = ' ';
+    }
+    std::string title = "Formulaic Custom Input: " + clean_title.substr(0, 45);
+    if (clean_title.length() > 45) title += "...";
     fb.draw_text(16, 16, title, formulaic::Color::White);
 
     auto save_res = formulaic::ImageExport::save_bmp(fb, out_path);

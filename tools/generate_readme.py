@@ -1,4 +1,6 @@
-# Formulaic
+import os
+
+readme_content = """# Formulaic
 
 <div align="center">
 
@@ -259,7 +261,7 @@ if (eq) {
     // 自动转化为零等值函数 (x^2 + y^2) - 4
     double val_on_circle = eq->eval(2.0, 0.0); // 返回 0.0
     double val_inside    = eq->eval(0.0, 0.0); // 返回 -4.0
-    std::cout << "Circle at (2,0): " << val_on_circle << "\n";
+    std::cout << "Circle at (2,0): " << val_on_circle << "\\n";
 }
 ```
 
@@ -269,8 +271,8 @@ if (eq) {
 
 // 包含中间变量声明的多语句脚本
 const std::string script = 
-    "let r = hypot(x, y);\n"
-    "let theta = atan2(y, x);\n"
+    "let r = hypot(x, y);\\n"
+    "let theta = atan2(y, x);\\n"
     "sin(6 * theta) * exp(-0.35 * r);";
 
 auto expr = formulaic::Expression::parse(script, {"x", "y"});
@@ -343,7 +345,7 @@ renderer->present(); // 毫秒级极速 blit
 工程内置了开箱即用的分屏交互数学工作室 `test_editor_window.exe`：
 
 ```powershell
-& "F:\Formulaic\build\test\Release\test_editor_window.exe" --interactive
+& "F:\\Formulaic\\build\\test\\Release\\test_editor_window.exe" --interactive
 ```
 
 * **语法高亮 (Syntax Highlighting)**：基于 Win32 RichEdit 引擎，支持关键字 (`let`, `var`)、60+ 内置数学函数、数字常数与注释的分词着色（Catppuccin 现代配色）。
@@ -374,3 +376,9 @@ renderer->present(); // 毫秒级极速 blit
 ## 开源协议
 
 本项目采用 [MIT 许可证](LICENSE) 开源。欢迎 Star、Fork 或提交 Issue / Pull Request！
+"""
+
+with open(r'F:\Formulaic\README.md', 'w', encoding='utf-8', newline='\n') as f:
+    f.write(readme_content)
+
+print("Successfully wrote F:\\Formulaic\\README.md in UTF-8 encoding!")
