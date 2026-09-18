@@ -60,6 +60,8 @@ dist/
 *.raw
 !assets/**
 !test/fixtures/**
+nuget/
+*.nupkg
 
 # --- System & Editor Temporary Files ---
 Thumbs.db

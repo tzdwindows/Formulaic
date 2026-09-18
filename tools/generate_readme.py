@@ -7,6 +7,7 @@ readme_content = """# Formulaic
 [![C++20](https://img.shields.io/badge/Standard-C%2B%2B20-blue.svg)](https://en.cppreference.com/w/cpp/20)
 [![CMake](https://img.shields.io/badge/CMake-3.20%2B-green.svg)](https://cmake.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![NuGet](https://img.shields.io/nuget/v/Formulaic.svg?style=flat&logo=nuget)](https://www.nuget.org/packages/Formulaic/)
 [![GitHub Release](https://img.shields.io/badge/Release-v1.1.0-orange.svg)](https://github.com/tzdwindows/Formulaic/releases)
 [![Build & Test](https://img.shields.io/badge/CTest-100%25%20Passed-brightgreen.svg)]()
 
@@ -245,6 +246,16 @@ cmake --build build --config Release
 # 3. 运行全自动化单元测试与集成测试
 ctest --test-dir build -C Release --output-on-failure
 ```
+
+### 3. Visual Studio / NuGet 一键集成
+如果你在 Visual Studio 2022 / 2026 中开发 C++20 工程，可以直接通过 NuGet 安装：
+
+```powershell
+# 包管理器控制台 (Package Manager Console)
+Install-Package Formulaic
+```
+
+*已内置针对 MSBuild 的自动集成配置文件 (`Formulaic.targets`)，开箱即用自动注入头文件包含目录、`x64` 静态库 (`Formulaic_static.lib`)、动态导入库与运行时 DLL (`Formulaic.dll`)。*
 
 ---
 

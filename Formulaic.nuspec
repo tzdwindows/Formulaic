@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2013/05/nuspec.xsd">
+  <metadata>
+    <id>Formulaic</id>
+    <version>1.1.0</version>
+    <title>Formulaic</title>
+    <authors>tzdwindows</authors>
+    <owners>tzdwindows</owners>
+    <requireLicenseAcceptance>false</requireLicenseAcceptance>
+    <license type="expression">MIT</license>
+    <projectUrl>https://github.com/tzdwindows/Formulaic</projectUrl>
+    <repository type="git" url="https://github.com/tzdwindows/Formulaic.git" />
+    <readme>docs\README.md</readme>
+    <description>Modern C++20 high-performance mathematical function expression parser, numerical calculus &amp; FFT engine, and raster visualization library. Features zero-heap VM execution, implicit equation contour extraction (LHS = RHS), parametric curves, 2D scalar fields, Win32 double-buffered HWND rendering, syntax highlighting &amp; autocomplete editor, and extensible pipeline hooks.</description>
+    <summary>Modern C++20 High Performance Mathematical Parser, Numerical Calculus, FFT and Real-Time Visual Rendering Engine</summary>
+    <releaseNotes>v1.1.0: First-class mathematical equation parsing (LHS = RHS), split-window visual editor with syntax highlighting and intelligent autocomplete, numerical calculus, Cooley-Tukey FFT, variable scripts (let/var), and decoupled 60 FPS Win32 message pump.</releaseNotes>
+    <copyright>Copyright (c) 2026 tzdwindows</copyright>
+    <tags>native nativepackage cpp cpp20 math expression-parser calculus fft rendering marching-squares visualization win32</tags>
+  </metadata>
+  <files>
+    <file src="nuget\build\**" target="build" />
+    <file src="nuget\tools\**" target="tools" />
+    <file src="README.md" target="docs\README.md" />
+  </files>
+</package>
