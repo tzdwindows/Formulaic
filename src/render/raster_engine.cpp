@@ -245,8 +245,8 @@ void RasterEngine::plot_implicit(
 ) const {
     if (!expr.is_valid()) return;
 
-    // Grid step in screen pixels (2px grid for high quality subpixel contours)
-    constexpr int kStep = 2;
+    // Grid step in screen pixels (3px grid with sub-pixel interpolation for high FPS smooth contours)
+    constexpr int kStep = 3;
     const int cols = (fb.width() + kStep - 1) / kStep + 1;
     const int rows = (fb.height() + kStep - 1) / kStep + 1;
 

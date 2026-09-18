@@ -163,7 +163,13 @@ struct WindowState {
     bool is_dragging{false};
     int last_mouse_x{0};
     int last_mouse_y{0};
-    double current_time{0.0};
+    bool is_animated{false};
+    std::chrono::high_resolution_clock::time_point start_time{std::chrono::high_resolution_clock::now()};
+
+    [[nodiscard]] double get_elapsed_time() const noexcept {
+        auto now = std::chrono::high_resolution_clock::now();
+        return std::chrono::duration<double>(now - start_time).count();
+    }
 };
 
 LRESULT CALLBACK ManagedWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
@@ -185,7 +191,7 @@ LRESULT CALLBACK ManagedWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpara
             int h = HIWORD(lparam);
             if (state && state->renderer && w > 0 && h > 0) {
                 state->renderer->on_resize(w, h);
-                state->renderer->render(state->current_time);
+                state->renderer->render(state->get_elapsed_time());
                 state->renderer->present();
             }
             return 0;
@@ -302,9 +308,11 @@ LRESULT CALLBACK ManagedWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpara
                     state->renderer->viewport().pan(dx, dy);
                 }
 
-                // Immediately trigger render & present for real-time hover responsiveness
-                state->renderer->render(state->current_time);
-                state->renderer->present();
+                // If not continuously animated, immediately redraw on mouse motion
+                if (!state->is_animated) {
+                    state->renderer->render(state->get_elapsed_time());
+                    state->renderer->present();
+                }
             }
             return 0;
         }
@@ -328,8 +336,10 @@ LRESULT CALLBACK ManagedWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpara
                 state->renderer->dispatch_mouse_event(me);
 
                 state->renderer->viewport().zoom(factor, Point2D(static_cast<double>(pt.x), static_cast<double>(pt.y)));
-                state->renderer->render(state->current_time);
-                state->renderer->present();
+                if (!state->is_animated) {
+                    state->renderer->render(state->get_elapsed_time());
+                    state->renderer->present();
+                }
             }
             return 0;
         }
@@ -337,8 +347,10 @@ LRESULT CALLBACK ManagedWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpara
         case WM_LBUTTONDBLCLK: {
             if (state && state->renderer) {
                 state->renderer->viewport().set_bounds(Rect2D(-10.0, 10.0, -10.0, 10.0));
-                state->renderer->render(state->current_time);
-                state->renderer->present();
+                if (!state->is_animated) {
+                    state->renderer->render(state->get_elapsed_time());
+                    state->renderer->present();
+                }
             }
             return 0;
         }
@@ -406,27 +418,43 @@ void destroy_win32_window(Win32WindowHandle handle) {
 
 void run_win32_message_loop(IWindowRenderer* renderer, bool run_animation) {
     MSG msg{};
-    auto start_time = std::chrono::high_resolution_clock::now();
 
     HWND hwnd = renderer ? reinterpret_cast<HWND>(renderer->native_handle()) : nullptr;
     WindowState* state = hwnd ? reinterpret_cast<WindowState*>(GetWindowLongPtr(hwnd, GWLP_USERDATA)) : nullptr;
+    if (state) {
+        state->is_animated = run_animation;
+        state->start_time = std::chrono::high_resolution_clock::now();
+    }
+
+    using clock = std::chrono::high_resolution_clock;
+    auto last_frame = clock::now();
 
     while (msg.message != WM_QUIT) {
-        if (PeekMessageA(&msg, nullptr, 0, 0, PM_REMOVE)) {
+        // Drain all pending messages so mouse and window inputs are immediately consumed
+        while (PeekMessageA(&msg, nullptr, 0, 0, PM_REMOVE)) {
+            if (msg.message == WM_QUIT) break;
             TranslateMessage(&msg);
             DispatchMessageA(&msg);
-        } else {
-            if (run_animation && renderer && renderer->is_attached()) {
-                auto now = std::chrono::high_resolution_clock::now();
-                double elapsed = std::chrono::duration<double>(now - start_time).count();
-                if (state) {
-                    state->current_time = elapsed;
+        }
+        if (msg.message == WM_QUIT) break;
+
+        if (run_animation && renderer && renderer->is_attached()) {
+            double elapsed = state ? state->get_elapsed_time() : 0.0;
+            renderer->render(elapsed);
+            renderer->present();
+
+            // Smooth 60 FPS frame pacing (~16.6 ms per frame)
+            auto now = clock::now();
+            auto delta_us = std::chrono::duration_cast<std::chrono::microseconds>(now - last_frame).count();
+            if (delta_us < 16000) {
+                DWORD sleep_ms = static_cast<DWORD>((16000 - delta_us) / 1000);
+                if (sleep_ms > 0) {
+                    Sleep(sleep_ms);
                 }
-                renderer->render(elapsed);
-                renderer->present();
-            } else {
-                WaitMessage();
             }
+            last_frame = clock::now();
+        } else {
+            WaitMessage();
         }
     }
 }
