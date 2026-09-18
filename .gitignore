@@ -53,10 +53,12 @@ installed/
 
 # --- Test Outputs & Generated Artifacts ---
 test_output/
+dist/
 *.bmp
 *.png
 *.ppm
 *.raw
+!assets/**
 !test/fixtures/**
 
 # --- System & Editor Temporary Files ---

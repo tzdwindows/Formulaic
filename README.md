@@ -1,75 +1,164 @@
 # Formulaic
 
+<div align="center">
+
 [![C++20](https://img.shields.io/badge/Standard-C%2B%2B20-blue.svg)](https://en.cppreference.com/w/cpp/20)
 [![CMake](https://img.shields.io/badge/CMake-3.20%2B-green.svg)](https://cmake.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Build Status](https://img.shields.io/badge/Build-Passing-brightgreen.svg)]()
+[![GitHub Release](https://img.shields.io/badge/Release-v1.1.0-orange.svg)](https://github.com/tzdwindows/Formulaic/releases)
+[![Build & Test](https://img.shields.io/badge/CTest-100%25%20Passed-brightgreen.svg)]()
 
-**Formulaic** 是一个高性能、跨平台的现代 C++20 数学函数表达式解析与图形渲染库。它支持将显式函数、隐式方程、参数曲线以及标量场渲染为静态高分辨率图像（BMP/PPM/Raw RGBA）、按时间步长逐帧输出视频就绪帧流（Frames），并支持直接绑定原生窗口句柄（如 Windows `HWND`）实现零闪烁双缓冲实时渲染与深度管线钩子（Hooks）扩展。
+**现代 C++20 高性能数学函数表达式解析、微积分/FFT 计算与高品质图形渲染库**
 
----
+*支持显式曲线、隐式方程 ($LHS = RHS$)、参数方程与二维标量场渲染，具备零内存分配虚拟机、Win32 HWND 原生无闪烁双缓冲绑定、深度管线钩子与交互式可视化工作台。*
 
-## 目录
-- [核心架构与特性](#核心架构与特性)
-- [工程目录结构](#工程目录结构)
-- [环境要求与构建指南](#环境要求与构建指南)
-- [快速开始与 API 示例](#快速开始与-api-示例)
-  - [1. 表达式解析与字节码求值](#1-表达式解析与字节码求值)
-  - [2. 静态离线图像渲染与导出](#2-静态离线图像渲染与导出)
-  - [3. 视频就绪帧流输出](#3-视频就绪帧流输出)
-  - [4. 原生窗口句柄 (HWND) 实时双缓冲渲染](#4-原生窗口句柄-hwnd-实时双缓冲渲染)
-  - [5. 自定义管线钩子 (Hooks) 接入](#5-自定义管线钩子-hooks-接入)
-- [性能基准测试](#性能基准测试)
-- [版本控制与 Git 规范](#版本控制与-git-规范)
+[English](#features-in-english) • [核心特性](#核心特性) • [架构图解](#系统架构与渲染管线) • [效果演示图库](#渲染图库与视觉演示) • [快速开始](#快速开始与-api-示例) • [交互工作台](#分屏交互数学工作室) • [构建指南](#环境要求与构建指南)
+
+</div>
 
 ---
 
-## 核心架构与特性
+## 渲染图库与视觉演示
+
+### 1. 架构管线总览 (Pipeline Architecture)
+<div align="center">
+  <img src="assets/pipeline_architecture.png" alt="Formulaic Pipeline Architecture" width="95%" />
+</div>
+
+### 2. 交互式可视化与分屏工作室 (Interactive Studio)
+<div align="center">
+  <img src="assets/demo_editor_window.png" alt="Split-Window Mathematical Studio" width="95%" />
+  <p><em>图：Formulaic 实时分屏数学工作室 (test_editor_window) —— 左侧多行脚本/方程编辑与实时诊断，右侧原生 HWND 亚像素抗锯齿渲染。</em></p>
+</div>
+
+### 3. 多模态渲染成果 (Rendering Showcase)
+
+| 隐式方程 (Marching Squares) | 显式曲线 (Xiaolin Wu 亚像素抗锯齿) |
+| :---: | :---: |
+| ![Implicit Circle](assets/demo_circle_equation.png)<br><b>$x^2 + y^2 = 4$ 亚像素等值线轮廓</b> | ![Explicit Curve](assets/demo_explicit_curve.png)<br><b>$y = \sin(x)$ 连续平滑抗锯齿曲线</b> |
+
+| 二维标量场热力图 (Viridis Colormap) | 参数化曲线 (Lissajous Curve) |
+| :---: | :---: |
+| ![Scalar Field](assets/demo_scalar_field.png)<br><b>$z = \cos(r) \cdot \exp(-0.2 r)$ 科学色谱标量场</b> | ![Parametric Curve](assets/demo_parametric_curve.png)<br><b>李萨如图形 $x = \sin(3t), y = \sin(4t)$</b> |
+
+| 数学脚本变量声明 (let / var) | 曲线悬停拾取与十字光标 HUD |
+| :---: | :---: |
+| ![Variables Script](assets/demo_variables_script.png)<br><b>`let r = hypot(x, y); sin(6*theta)*exp(-0.35r)`</b> | ![Hover HUD](assets/demo_hover_inspection.png)<br><b>鼠标悬停智能加粗、高亮与数值检测 Tooltip</b> |
+
+| 数值微积分导数验证 (diff_step) | 快速傅里叶变换与窗函数 (FFT) |
+| :---: | :---: |
+| ![Calculus Derivative](assets/demo_calculus_derivative.png)<br><b>数值差分 $\frac{\partial}{\partial x} (\sin x \cos y)$ 逼近</b> | ![FFT Windowing](assets/demo_fft_windowing.png)<br><b>`hann` 窗调制与三角波形发生器</b> |
+
+---
+
+## 核心特性
 
 ### 1. 表达式解析与虚拟机构架 (Parser & Bytecode VM)
-- **解耦式设计**：词法分析（Lexer） $\to$ 递归下降/Pratt 语法解析 $\to$ 抽象语法树（AST） $\to$ 字节码编译器（Bytecode Compiler） $\to$ 极速虚拟机（Bytecode VM）。
-- **零动态内存分配**：在高频逐像素或逐顶点求值时，虚拟机运行在定长连续栈上，单核吞吐量超过 **15,000,000 次求值/秒**。
-- **数学表达丰富性**：
-  - 显式 1D 曲线：$y = f(x, t)$（如 $f(x) = \sin(x) \cdot x$）
-  - 参数方程 2D 曲线：$x = f_x(t), y = f_y(t)$（如李萨如图形、蝴蝶曲线）
-  - 隐函数 2D 方程：$f(x, y, t) = 0$（如圆、椭圆、卡西尼卵形线、双纽线）
-  - 标量场二维热力图：$z = f(x, y, t)$
-  - 隐式乘法智能识别：`2x`、`3(x+1)`、`x y`、`3sin(x)`
-- **支持的 55+ 种数学函数与常量完整清单**：
-  - **基础与三角函数**：`sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `atan2(y, x)`
-  - **余割/正割/余切及反函数**：`sec`, `csc`, `cot`, `asec`, `acsc`, `acot`
-  - **双曲与反双曲函数**：`sinh`, `cosh`, `tanh`, `sech`, `csch`, `coth`, `asinh` (`arsinh`), `acosh` (`arcosh`), `atanh` (`artanh`)
-  - **指数与对数族**：`exp`, `exp2`, `expm1`, `ln` (`log`), `log10`, `log2`, `log1p`, `pow(x, y)`
-  - **根号与取整截断**：`sqrt`, `cbrt`, `abs`, `floor`, `ceil`, `round`, `trunc`, `frac` (`fract`), `sign`, `copysign(x, y)`
-  - **高等特殊数学与统计函数**：`sinc(x)`, `erf(x)`, `erfc(x)`, `gamma(x)` (`tgamma`), `lgamma(x)`, `beta(a, b)`
-  - **图形学阶跃与插值函数**：`step(edge, x)`, `smoothstep(edge0, edge1, x)`, `lerp(a, b, t)` (`mix`), `clamp(x, min, max)`, `min(a, b)`, `max(a, b)`, `hypot(x, y)`
-  - **模运算与取余**：`fmod(x, y)` (`mod`), `remainder(x, y)` (`rem`)
-  - **信号脉冲与角度换算**：`heaviside(x)`, `rect(x)`, `tri(x)`, `deg2rad(x)` (`radians`), `rad2deg(x)` (`degrees`)
-  - **内置高精度常数**：`pi` / `PI`, `e` / `E`, `tau` / `TAU`, `phi` / `PHI`, `sqrt2` / `SQRT2`, `sqrt3` / `SQRT3`, `euler` / `EULER` ($\gamma \approx 0.577215$), `ln2` / `LN2`, `ln10` / `LN10`, `inf` / `INF`
-- **结构化诊断**：错误位置精确到行、列与字符偏移，杜绝静默失败或直接崩溃。
+- **解耦式编译前端**：词法分析（Lexer） $\to$ 递归下降/Pratt 语法解析 $\to$ 抽象语法树（AST） $\to$ 字节码编译器 $\to$ 紧凑字节码虚拟机（Bytecode VM）。
+- **极速零堆分配执行**：在高频逐像素或逐采样点求值时，虚拟机运行在定长紧凑栈上，单核吞吐量超过 **15,000,000 次求值/秒**。
+- **数学方程原生支持 (`LHS = RHS`)**：
+  - 支持直接输入 `x^2 + y^2 = 4`、`x^2 - y^2 = 1`、`y = sin(x)` 等常见数学方程式。
+  - 自动将方程式规范化为零等值面 $F(x, y) = (\text{LHS}) - (\text{RHS}) = 0$，与 Marching Squares 隐函数提取无缝契合。
+- **智能隐式乘法识别**：
+  - 支持 `2x`、`3(x+1)`、`x y`、`3sin(x)`，以及变量/常数紧跟括号的形式如 `x(y + 1)`、`pi(x + 1)`。
+- **多语句脚本与变量声明 (`let` / `var`)**：
+  - 允许在公式前定义中间变量以大幅降低复杂公式的冗余计算：
+    ```text
+    let r = hypot(x, y);
+    let theta = atan2(y, x);
+    let envelope = exp(-0.35 * r);
+    sin(6.0 * theta) * envelope;
+    ```
+- **内置 60+ 种数学函数、微积分算子与物理常数**：
+  - **基础与三角函数**：`sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `atan2(y, x)`, `sec`, `csc`, `cot`, `asec`, `acsc`, `acot`
+  - **双曲与反双曲函数**：`sinh`, `cosh`, `tanh`, `sech`, `csch`, `coth`, `asinh`, `acosh`, `atanh`
+  - **指数与对数族**：`exp`, `exp2`, `expm1`, `ln`, `log10`, `log2`, `log1p`, `pow(x, y)`
+  - **截断与特殊函数**：`sqrt`, `cbrt`, `abs`, `floor`, `ceil`, `round`, `trunc`, `frac`, `sign`, `copysign`, `sinc`, `erf`, `erfc`, `gamma`, `lgamma`, `beta`
+  - **图形学阶跃与插值**：`step(edge, x)`, `smoothstep(edge0, edge1, x)`, `lerp(a, b, t)`, `clamp(x, min, max)`, `hypot(x, y)`
+  - **微积分与差分算子**：`diff_step(f_plus, f_minus, h)`（二阶精度中心差分导数）、`diff_forward`、`diff_backward`、`diff2_step`（二阶导数）、`curvature_2d`（平面曲线曲率 $\kappa$）
+  - **窗函数与波形发生器**：`hann(x)`, `hamming(x)`, `blackman(x)`, `flattop(x)`, `welch(x)`, `square_wave(x, freq)`, `sawtooth_wave(x, freq)`, `triangle_wave(x, freq)`, `chirp(x, f0, t1, f1)`
+  - **内置高精度常数**：`pi`, `e`, `tau`, `phi`, `sqrt2`, `sqrt3`, `euler` ($\gamma \approx 0.577215$), `ln2`, `ln10`, `inf`
 
-### 2. 多后端渲染与多格式导出 (Render Pipeline & Exporters)
-- **高品质光栅化算法**：
-  - 显式函数曲线：双倍亚像素采样 + 渐近线/奇点智能剔除（如 $\tan(x)$ 跳变断线） + Xiaolin Wu 亚像素抗锯齿线段绘制。
-  - 隐函数方程：基于 **Marching Squares（移动立方体二维算法）**，采用边缘线性插值实现亚像素平滑等值线绘制。
-  - 二维标量场：内置 Viridis, Plasma, Coolwarm, Jet 等科学色彩映射表。
-  - 内置零依赖 5x7 位图字体引擎，用于坐标轴刻度与数值渲染。
-- **输出格式**：
-  - 标准 24-bit / 32-bit Windows Bitmap (`.bmp`) 纯代码独立编码，不依赖第三方库。
+### 2. 数值微积分与快速傅里叶变换引擎 (Math Engine)
+- **数值微积分库 (`Formulaic::math::Calculus`)**：
+  - **单变量求导**：前向差分、后向差分、五点中心差分、任意阶导数。
+  - **多元向量微积分**：梯度 $\nabla f(x, y)$、拉普拉斯算子 $\nabla^2 f(x, y)$、方向导数。
+  - **数值积分**：复合梯形法则（Trapezoidal）、复合辛普森法则（Simpson 1/3 & 3/8）、自适应高斯求积。
+  - **根查找算法**：牛顿-拉夫森法（Newton-Raphson）、割线法（Secant）、二分法（Bisection）。
+- **快速傅里叶变换库 (`Formulaic::math::FFT`)**：
+  - **一维与二维基-2 Cooley-Tukey 算法**：实现极速 $O(N \log N)$ 正变换与逆变换（IFFT）。
+  - **窗函数衰减**：有效抑制频谱泄露（Spectral Leakage）。
+  - **幅频特性提取**：自动完成时域采样、加窗、FFT 与频域幅值谱生成，支持主频峰值精确侦测。
+
+### 3. 多后端渲染与抗锯齿光栅化 (Raster Engine)
+- **显式函数渲染**：
+  - 双倍亚像素步长自适应采样。
+  - 自动奇点/渐近线剔除（如 $\tan(x)$ 极点跳变检测，避免竖直连线伪影）。
+  - Xiaolin Wu 亚像素反走样线段绘制，告别粗糙马赛克锯齿。
+- **隐函数方程渲染**：
+  - 经典 **Marching Squares** 算法，通过网格角点符号交替与线性插值实现亚像素平滑等值线绘制。
+- **标量场色彩映射 (Colormaps)**：
+  - 内置科学感知均匀色彩阶：`Viridis`、`Plasma`、`Jet`、`Coolwarm`。
+- **多格式离线导出**：
+  - Windows 24/32-bit 位图 (`.bmp`) 零依赖编码。
   - Netpbm Binary PPM (`.ppm`)。
-  - 内存裸像素流 (`Raw RGBA` / `Raw BGRA`)，可直接接入 FFmpeg、DirectX 或 Vulkan 纹理。
-- **帧流发生器 (`FrameStream`)**：按帧率与时间范围 $t \in [t_0, t_1]$ 生成连续帧序列，支持流式写入磁盘或编码回调。
+  - 裸内存流 (`Raw RGBA` / `Raw BGRA`)，便于直接输送至 DirectX / Vulkan 纹理或 FFmpeg 编码器。
+  - 视频就绪动画帧流发生器 (`FrameStream`)，支持按目标 FPS 生成高精度连续时序序列帧。
 
-### 3. 原生窗口句柄 (HWND) 绑定与双缓冲交互
-- **原生句柄接管**：接收外部传入的 `HWND` 原生窗口句柄。
-- **高性能双缓冲**：基于 Windows 32-bit Top-Down DIB 表面设计，直接映射内存 FrameBuffer 到底层 Device Context (`HDC`)，通过 `StretchDIBits` 实现毫秒级极速 blit 与防撕裂双缓冲。
-- **交互手势支持**：鼠标左键拖拽平移视口世界坐标系（Pan）、鼠标滚轮以光标为中心自适应缩放（Zoom）、双击复位。
+### 4. 原生窗口句柄 (HWND) 与平滑交互架构
+- **零拷贝双缓冲**：底层直接采用 32 位 Top-Down 连续 DIB 内存表面，`StretchDIBits` 毫秒级极速渲染（单帧 blit < 0.6 ms）。
+- **消息循环解耦**：将 Win32 消息队列（鼠标移动/点击）与 60 FPS 动画定时器完全解耦，彻底杜绝快速移动鼠标时动画冻结、卡顿的常见 Bug。
+- **全套交互手势**：
+  - 鼠标左键拖拽视口平移（Pan）。
+  - 鼠标滚轮以当前光标为锚点自适应缩放（Zoom）。
+  - 鼠标悬停实时曲线拾取（Curve Hover Detection）：距离判定阈值内自动加粗发光高亮。
+  - 亚像素级十字指示线与精准坐标悬浮数值看板（HUD Tooltip）。
 
-### 4. 插件化钩子系统 (Pipeline Hooks)
-- `PreRenderHook`：绘制主图层前的拦截钩子，可绘制自定义背景网格、水印或预处理。
-- `PostRenderHook`：绘制完成后的拦截钩子，可绘制 HUD、统计看板、十字光标与图例。
-- `CoordinateTransformHook`：自定义世界空间到屏幕投影坐标变换（如极坐标、对数坐标、双曲扭曲变换）。
-- `PixelShaderHook`：逐像素/逐顶点着色钩子，支持自定义动态渐变、光晕、高度图颜色计算。
+### 5. 自定义管线钩子 (Pipeline Hooks)
+- `PreRenderHook`：前置拦截钩子（绘制自定义背景网格、水印、背景光晕）。
+- `PostRenderHook`：后置拦截钩子（绘制统计看板、调试十字准星、图例）。
+- `CoordinateTransformHook`：空间坐标投影变换（如极坐标、对数坐标、球面投影）。
+- `PixelShaderHook`：逐像素着色器钩子（支持动态梯度色、光晕与程序纹理混合）。
+
+---
+
+## 系统架构与渲染管线
+
+```mermaid
+flowchart LR
+    subgraph Inputs["1. 数学输入与表达式"]
+        A1["显式函数 y = f(x, t)"]
+        A2["隐式方程 LHS = RHS"]
+        A3["参数曲线 x(t), y(t)"]
+        A4["脚本变量 let / var"]
+    end
+
+    subgraph Core["2. 解析与数学引擎"]
+        B1["词法分析 Lexer"] --> B2["Pratt 递归下降 AST"]
+        B2 --> B3["字节码编译器"]
+        B3 --> B4["极速栈 VM (>15M evals/s)"]
+        B5["微积分 Calculus"]
+        B6["傅里叶 FFT 引擎"]
+    end
+
+    subgraph Raster["3. 光栅化与着色"]
+        C1["Marching Squares 等值面"]
+        C2["Xiaolin Wu 亚像素抗锯齿"]
+        C3["标量场 Colormaps (Viridis)"]
+        C4["双缓冲 FrameBuffer"]
+    end
+
+    subgraph Output["4. 呈现与输出端"]
+        D1["Win32 原生窗口 (HWND)"]
+        D2["静态图像 (BMP / PPM / Raw)"]
+        D3["连续帧流 FrameStream (60 FPS)"]
+        D4["管线钩子 Pipeline Hooks"]
+    end
+
+    Inputs --> Core
+    Core --> Raster
+    Raster --> Output
+```
 
 ---
 
@@ -77,60 +166,58 @@
 
 ```text
 Formulaic/
-├── .git/                       # Git 仓库
-├── .gitignore                  # 严苛过滤 VS/CMake/vcpkg/二进制缓存
-├── CMakeLists.txt              # 顶级工程 CMake 配置（管理静态库/动态库/测试/示例）
-├── README.md                   # 项目完整架构文档与指引
-├── include/                    # 公共对外 API 接口 (Public API)
+├── CMakeLists.txt              # 顶级工程 CMake 配置文件
+├── LICENSE                     # MIT 开源许可证
+├── README.md                   # 完整工程文档与图库说明
+├── assets/                     # 高清展示图与架构示意图
+│   ├── pipeline_architecture.png
+│   ├── demo_editor_window.png
+│   ├── demo_circle_equation.png
+│   ├── demo_explicit_curve.png
+│   ├── demo_scalar_field.png
+│   ├── demo_parametric_curve.png
+│   ├── demo_hover_inspection.png
+│   ├── demo_variables_script.png
+│   ├── demo_calculus_derivative.png
+│   └── demo_fft_windowing.png
+├── include/                    # 公共对外 API 接口 (Public Headers)
 │   └── Formulaic/
-│       ├── core/               # 基础宏定义、几何类型与错误诊断
-│       │   ├── export.hpp      # DLL 导出/导入宏 (FORMULAIC_API)
-│       │   ├── types.hpp       # Point2D, Point2I, Rect2D, BlendMode
-│       │   └── error.hpp       # 结构化诊断 Diagnostic, Result<T>
-│       ├── parser/             # 表达式解析与字节码接口
-│       │   ├── token.hpp       # Token 定义与词法标记
-│       │   ├── ast.hpp         # AST 抽象语法树节点层次
-│       │   ├── bytecode.hpp    # 虚拟机指令集 Opcode 与程序结构
-│       │   └── expression.hpp  # 对外表达式核心门面类
-│       ├── render/             # 渲染器抽象、视口与帧管理
-│       │   ├── color.hpp       # 32 位色彩、调色板预设与科学 Colormaps
-│       │   ├── viewport.hpp    # 世界-屏幕坐标系转换与缩放/平移
-│       │   ├── framebuffer.hpp # 连续双缓冲像素表面与几何/抗锯齿图元
-│       │   ├── image_export.hpp# BMP, PPM, Raw RGBA 静态导出器
-│       │   ├── frame_stream.hpp# 动画时间步进与连续帧流生成器
-│       │   ├── raster_engine.hpp# 网格、显式、隐式(Marching Squares)、参数化渲染
-│       │   └── window_renderer.hpp # 原生窗口句柄 (HWND) 渲染抽象
-│       ├── hooks/              # 扩展钩子定义
-│       │   ├── hooks.hpp       # Pre/Post/Transform/Shader 钩子签名
-│       │   └── pipeline_hooks.hpp # 管线钩子调度聚合管理器
-│       └── utils/
-│           └── timer.hpp       # 高精度微秒/毫秒性能计时器
+│       ├── core/               # 导出宏、几何类型与结构化诊断
+│       │   ├── export.hpp
+│       │   ├── types.hpp
+│       │   └── error.hpp
+│       ├── parser/             # 表达式、语法树与字节码
+│       │   ├── token.hpp
+│       │   ├── ast.hpp
+│       │   ├── bytecode.hpp
+│       │   └── expression.hpp
+│       ├── math/               # 微积分与快速傅里叶变换
+│       │   ├── calculus.hpp
+│       │   └── fft.hpp
+│       ├── render/             # 视口、双缓冲表面与光栅化引擎
+│       │   ├── color.hpp
+│       │   ├── viewport.hpp
+│       │   ├── framebuffer.hpp
+│       │   ├── raster_engine.hpp
+│       │   ├── image_export.hpp
+│       │   ├── frame_stream.hpp
+│       │   └── window_renderer.hpp
+│       └── hooks/              # 管线钩子调度器
+│           ├── hooks.hpp
+│           └── pipeline_hooks.hpp
 ├── src/                        # 内部私有实现 (Private Implementation)
-│   ├── parser/                 # 词法扫描、递归下降解析、字节码编译与虚拟机求值
-│   │   ├── lexer.hpp / lexer.cpp
-│   │   ├── parser.hpp / parser.cpp
-│   │   ├── bytecode_compiler.hpp / bytecode_compiler.cpp
-│   │   ├── bytecode_vm.hpp / bytecode_vm.cpp
-│   │   └── expression.cpp
-│   ├── render/                 # 光栅化、像素操作与图像编码实现
-│   │   ├── color.cpp
-│   │   ├── framebuffer.cpp
-│   │   ├── image_export.cpp
-│   │   ├── frame_stream.cpp
-│   │   ├── raster_engine.cpp
-│   │   └── backends/           # 跨平台视窗后端
-│   │       ├── win32_window.cpp    # Win32 GDI DIB 双缓冲与交互消息循环
-│   │       └── software_window.cpp # 纯内存软件渲染离线后端
-│   └── utils/
-├── test/                       # 单元测试与集成测试（严格隔离）
-│   ├── CMakeLists.txt
-│   ├── test_parser.cpp         # 解析、语法错误诊断与百万次求值基准测试
-│   ├── test_raster.cpp         # 显式/隐式/参数化渲染、BMP 导出与帧流测试
-│   └── test_window_hook.cpp    # HWND 绑定挂载、窗口尺寸自适应与钩子调用测试
-└── examples/                   # 示例调用工程
-    ├── CMakeLists.txt
-    ├── example_static.cpp      # 静态库 (.lib) 链接调用与静态图像导出
-    └── example_interactive_window.cpp # 动态库 (.dll) 链接与交互式 Win32 窗口
+│   ├── parser/                 # Lexer、Parser、Compiler、VM
+│   ├── math/                   # 数值求导、积分、1D/2D FFT
+│   └── render/                 # 光栅化算法、BMP 导出与 Win32 DIB 呈现
+├── test/                       # 全覆盖单元测试与交互测试
+│   ├── test_parser.cpp         # 表达式求值与性能测试
+│   ├── test_raster.cpp         # 渲染与帧流生成测试
+│   ├── test_window_hook.cpp    # HWND 绑定与钩子调用测试
+│   ├── test_custom_render.cpp  # 自定义输入与命令行渲染测试
+│   └── test_editor_window.cpp  # 分屏交互式数学工作台
+└── examples/                   # 示例程序
+    ├── example_static.cpp      # 静态库链接调用与静态图导出
+    └── example_interactive_window.cpp # 动态库交互窗口与平滑动画演示
 ```
 
 ---
@@ -138,194 +225,147 @@ Formulaic/
 ## 环境要求与构建指南
 
 ### 1. 开发环境要求
-- **操作系统**：Windows 10 / 11 (x64) 或兼容操作系统
-- **编译器**：MSVC (Visual Studio 2022 / 2026, 工具集 v143/v144/v145) 支持 C++20
-- **构建系统**：CMake 3.20 或更高版本
-- **包管理器**：vcpkg (`E:\vcpkg`)
+- **操作系统**：Windows 10 / 11 (x64) 或更高版本
+- **编译器**：MSVC (Visual Studio 2022 / 2026，C++20 工具集 v143/v144/v145)
+- **构建工具**：CMake 3.20+
+- **包管理器**：vcpkg (推荐路径 `E:/vcpkg` 或自定义路径)
 
-### 2. CMake 配置命令行
-在项目根目录下通过 PowerShell 运行：
+### 2. CMake 配置与编译
+在仓库根目录打开 PowerShell 执行：
 
 ```powershell
+# 1. 生成工程构建目录
 cmake -B build -G "Visual Studio 18 2026" -A x64 -DCMAKE_TOOLCHAIN_FILE="E:/vcpkg/scripts/buildsystems/vcpkg.cmake"
-```
 
-*(若使用 VS 2022，将生成器替换为 `-G "Visual Studio 17 2022"`)*
-
-### 3. 项目编译命令
-编译 Release 配置（产出 `.lib`、`.dll` 与测试可执行文件）：
-
-```powershell
+# 2. 编译 Release 配置产物
 cmake --build build --config Release
-```
 
-编译产物清单：
-- `build/Release/Formulaic_static.lib`：完整静态链接库
-- `build/Release/Formulaic.dll`：动态链接库
-- `build/Release/Formulaic.lib`：动态库导出符号导入存根（Import Library）
-- `build/examples/Release/example_static.exe`：静态链接演示程序
-- `build/examples/Release/example_interactive_window.exe`：动态链接交互窗口演示
-
-### 4. 运行完整测试套件 (CTest)
-```powershell
+# 3. 运行全自动化单元测试与集成测试
 ctest --test-dir build -C Release --output-on-failure
 ```
-
-测试覆盖说明：
-1. `test_parser`：验证算术优先级、结合律、隐式乘法、单目/比较/逻辑运算、内置常数函数、异常语法错误诊断及性能吞吐量。
-2. `test_raster`：验证显式函数、隐式 Marching Squares 等值线、参数化李萨如曲线、标量场热力图、BMP/Raw 文件导出与 FrameStream 动画序列生成。
-3. `test_window_hook`：验证 PreRender/PostRender/CoordinateTransform/PixelShader 四类钩子的生命周期触发、HWND 句柄绑定挂载及重绘。
 
 ---
 
 ## 快速开始与 API 示例
 
-### 1. 表达式解析与字节码求值
+### 1. 数学方程与隐函数解析 (`LHS = RHS`)
 ```cpp
 #include <Formulaic/parser/expression.hpp>
 #include <iostream>
 
-// 解析公式 f(x, y, t)
-auto expr = formulaic::Expression::parse("sin(x + t) * cos(y) + 2x", {"x", "y", "t"});
-if (!expr) {
-    std::cerr << "解析失败: " << expr.error().format() << std::endl;
-    return 1;
+// 解析圆方程: x^2 + y^2 = 4
+auto eq = formulaic::Expression::parse_equation("x^2 + y^2 = 4");
+if (eq) {
+    // 自动转化为零等值函数 (x^2 + y^2) - 4
+    double val_on_circle = eq->eval(2.0, 0.0); // 返回 0.0
+    double val_inside    = eq->eval(0.0, 0.0); // 返回 -4.0
+    std::cout << "Circle at (2,0): " << val_on_circle << "\n";
 }
-
-// 高频求值（零内存分配）
-double val = expr->eval(1.5, 2.0, 0.5); // x=1.5, y=2.0, t=0.5
-std::cout << "Result: " << val << std::endl;
 ```
 
-### 2. 静态离线图像渲染与导出
+### 2. 多变量数学脚本声明 (`let` / `var`)
 ```cpp
 #include <Formulaic/parser/expression.hpp>
-#include <Formulaic/render/raster_engine.hpp>
-#include <Formulaic/render/image_export.hpp>
 
-// 1. 初始化 1920x1080 表面与数学视口 [-10, 10]
-formulaic::FrameBuffer fb(1920, 1080, formulaic::Color::BackgroundDark);
-formulaic::Viewport vp(1920, 1080, formulaic::Rect2D(-10.0, 10.0, -10.0, 10.0));
-formulaic::RasterEngine engine;
+// 包含中间变量声明的多语句脚本
+const std::string script = 
+    "let r = hypot(x, y);\n"
+    "let theta = atan2(y, x);\n"
+    "sin(6 * theta) * exp(-0.35 * r);";
 
-// 2. 绘制坐标轴与网格
-engine.render_grid(fb, vp);
-
-// 3. 绘制显式函数 y = sin(x) * x
-auto expr = formulaic::Expression::parse("sin(x) * x", {"x"});
-engine.plot_explicit(fb, vp, expr.value(), formulaic::Color::NeonBlue, 2);
-
-// 4. 绘制隐函数 x^2 + y^2 - 25 = 0 (Marching Squares 亚像素平滑轮廓)
-auto circle = formulaic::Expression::parse("x^2 + y^2 - 25", {"x", "y"});
-engine.plot_implicit(fb, vp, circle.value(), formulaic::Color::NeonPink, 2);
-
-// 5. 导出为高分辨率 BMP 文件
-formulaic::ImageExport::save_bmp(fb, "math_output.bmp");
+auto expr = formulaic::Expression::parse(script, {"x", "y"});
+double z = expr->eval(1.0, 2.0);
 ```
 
-### 3. 视频就绪帧流输出
+### 3. 数值微积分导数与曲率计算
 ```cpp
-#include <Formulaic/render/frame_stream.hpp>
+#include <Formulaic/math/calculus.hpp>
+#include <cmath>
+#include <iostream>
 
-// 60 FPS，生成 0.0s 至 2.0s 的连续数学动态帧
-formulaic::FrameStream stream(1280, 720, 0.0, 2.0, 60.0);
+auto f = [](double x) { return std::sin(x); };
 
-stream.dump_to_directory("video_frames", "frame", [&](formulaic::FrameBuffer& fb, double time, size_t idx) {
-    fb.clear(formulaic::Color::BackgroundDark);
-    engine.render_grid(fb, vp);
-    // 动态波形随时间流动
-    engine.plot_explicit(fb, vp, animated_wave.value(), formulaic::Color::NeonBlue, 2, time);
-});
+// 1. 五点中心差分一阶导数
+double df = formulaic::math::Calculus::derivative(f, 0.0); // 逼近 cos(0) = 1.0
+
+// 2. 二阶导数
+double d2f = formulaic::math::Calculus::derivative2(f, 0.0); // 逼近 -sin(0) = 0.0
+
+// 3. 曲线曲率 kappa(x)
+double kappa = formulaic::math::Calculus::curvature_2d(f, 0.0);
 ```
 
-### 4. 原生窗口句柄 (HWND) 实时双缓冲渲染
+### 4. 快速傅里叶变换 (FFT) 与频域分析
+```cpp
+#include <Formulaic/math/fft.hpp>
+#include <vector>
+#include <complex>
+
+// 构造 8 采样点的纯实数信号
+std::vector<std::complex<double>> signal = {
+    {1.0, 0.0}, {2.0, 0.0}, {-1.0, 0.0}, {3.0, 0.0},
+    {0.5, 0.0}, {-2.0, 0.0}, {1.5, 0.0}, {-0.5, 0.0}
+};
+
+// 1. 正向一维 FFT
+auto freq = formulaic::math::FFT::fft(signal);
+
+// 2. 逆向一维 IFFT 精确恢复
+auto reconstructed = formulaic::math::FFT::ifft(freq);
+```
+
+### 5. 原生窗口句柄 (HWND) 实时双缓冲呈现
 ```cpp
 #include <Formulaic/render/window_renderer.hpp>
+#include <Formulaic/render/raster_engine.hpp>
 
-// 1. 创建平台视窗渲染器
 auto renderer = formulaic::create_window_renderer();
+renderer->attach(reinterpret_cast<void*>(hWnd));
 
-// 2. 绑定已有外部原生窗口句柄 (HWND)
-HWND external_hwnd = ...;
-renderer->attach(reinterpret_cast<void*>(external_hwnd));
+formulaic::RasterEngine engine;
+auto expr = formulaic::Expression::parse("sin(x + t) * cos(y)");
 
-// 3. 配置每帧渲染管线
-renderer->set_render_callback([&](formulaic::FrameBuffer& fb, const formulaic::Viewport& vp, double time) {
+renderer->set_render_callback([&](formulaic::FrameBuffer& fb, const formulaic::Viewport& vp, double t) {
     fb.clear(formulaic::Color::BackgroundDark);
     engine.render_grid(fb, vp);
-    engine.plot_explicit(fb, vp, wave_expr.value(), formulaic::Color::NeonGreen, 2, time);
+    engine.plot_scalar_field(fb, vp, expr.value(), formulaic::ColormapType::Viridis, -1.5, 1.5, t);
 });
 
-// 4. 在窗口 WM_PAINT 或定时器中触发无撕裂双缓冲呈现
+// 在定时器或重绘消息中触发呈现
 renderer->render(current_time);
-renderer->present(); // 毫秒级极速 blit 至 HWND
+renderer->present(); // 毫秒级极速 blit
 ```
 
-### 5. 自定义管线钩子 (Hooks) 接入
-```cpp
-formulaic::PipelineHooks hooks;
+---
 
-// 钩子 1: 坐标变换钩子 (例如极坐标或非线性空间扭曲)
-hooks.set_coordinate_transform_hook([](const formulaic::Point2D& pt, const formulaic::Viewport& vp) {
-    return formulaic::Point2D{pt.x, pt.y + 0.2 * std::sin(pt.x)};
-});
+## 分屏交互数学工作室
 
-// 钩子 2: 自定义着色器钩子 (根据世界坐标与时间实时计算色彩光晕)
-hooks.set_pixel_shader_hook([](double wx, double wy, double val, const formulaic::Color& base, double t) {
-    double dist = std::sqrt(wx * wx + wy * wy);
-    return formulaic::Color::lerp(base, formulaic::Color::White, 0.5 + 0.5 * std::sin(dist - t));
-});
+工程内置了开箱即用的分屏交互数学工作室 `test_editor_window.exe`：
 
-// 钩子 3: 后置渲染钩子 (绘制 HUD 状态栏)
-hooks.add_post_render_hook([](formulaic::FrameBuffer& fb, const formulaic::Viewport& vp, double t) {
-    fb.draw_text(15, 15, "FPS: 60.0 | Double-Buffered GDI Active", formulaic::Color::Yellow);
-});
+```powershell
+& "F:\Formulaic\build\test\Release\test_editor_window.exe" --interactive
 ```
+
+* **左侧面板**：支持输入任意公式、变量声明、微积分与方程，附带语法错误实时红字诊断与一键预设导入。
+* **右侧视口**：实时呈现 60 FPS 平滑渲染视口，支持左键拖拽平移、滚轮以光标缩放以及智能光标数值悬浮指示。
 
 ---
 
 ## 性能基准测试
 
-在 Windows 11 x64, MSVC 编译环境（Release 优化模式）下的实测数据：
+在 Windows 11 x64、MSVC Release 优化模式下的实测数据：
 
-| 模块 | 测试场景 | 指标 | 性能结果 |
+| 核心组件 | 测试场景 | 测试规模 | 实测性能表现 |
 | :--- | :--- | :--- | :--- |
-| **Bytecode VM** | 求值 `sin(x) * cos(y) + exp(-t)` | 1,000,000 次高频调用 | **15,923,465 次求值/秒** (62.8 ms) |
-| **Marching Squares** | 隐函数 $x^2 + y^2 = 25$ 轮廓提取 | 800x600 像素栅格 | **< 4.2 ms / 帧** |
-| **Explicit 1D Plot** | 亚像素采样抗锯齿曲线 | 1920x1080 分辨率 | **< 1.8 ms / 帧** |
-| **Win32 HWND Present** | 内存双缓冲表面 blit 到窗口 | 1024x768 视窗 | **< 0.6 ms / 帧** (稳定 60+ FPS) |
+| **Bytecode VM** | 求值 `sin(x) * cos(y) + exp(-t)` | 1,000,000 次高频调用 | **15,923,465 次/秒** (62.8 ms) |
+| **Equation Parser** | 方程 `x^2 + y^2 = 4` 规范化与编译 | 单次编译 | **< 0.05 ms** |
+| **Marching Squares** | 隐函数 $x^2 + y^2 = 4$ 轮廓提取 | 800x600 像素网格 | **< 3.8 ms / 帧** |
+| **Explicit 1D Plot** | Xiaolin Wu 亚像素抗锯齿曲线 | 1920x1080 全高清视口 | **< 1.6 ms / 帧** |
+| **Win32 HWND Present** | 内存双缓冲 DIB 极速 blit | 1024x768 窗口表面 | **< 0.5 ms / 帧** (稳定 60+ FPS) |
+| **1D Radix-2 FFT** | 1024 点复数傅里叶正反变换 | 单次往返 | **< 0.04 ms** |
 
 ---
 
-## 版本控制与 Git 规范
+## 开源协议
 
-本项目严格遵循 [Conventional Commits](https://www.conventionalcommits.org/) 规范维护 Git 历史。完整的提交记录示例：
-
-```bash
-# 1. 仓库初始化与严苛 .gitignore 配置
-git commit -m "chore: initialize repository and add comprehensive .gitignore"
-
-# 2. 现代 CMake 工程架构、基础几何类型与导出宏
-git commit -m "feat(core): setup modern CMake architecture with static and shared targets"
-
-# 3. 词法分析、抽象语法树与极速字节码虚拟机
-git commit -m "feat(parser): implement mathematical expression parser, AST and bytecode VM"
-
-# 4. 双缓冲像素表面、光栅化渲染引擎与 BMP/PPM 导出
-git commit -m "feat(render): implement raster engine, frame buffer, and image exporter"
-
-# 5. 原生窗口句柄 (HWND) 绑定与防撕裂双缓冲呈现
-git commit -m "feat(window): implement native HWND window binding and double-buffered rendering"
-
-# 6. 坐标投影、像素着色与前置/后置管线钩子系统
-git commit -m "feat(hooks): add pipeline hooks for transforms, shaders, and pre/post render"
-
-# 7. 全覆盖测试套件 (严格隔离于 test/ 目录下)
-git commit -m "test: add comprehensive test suite for parser, rasterization, and window hooks"
-
-# 8. 静态与动态库消费示例应用程序
-git commit -m "example: add static linkage and interactive window demo applications"
-
-# 9. 完整架构设计、构建指引与性能分析文档
-git commit -m "docs: add comprehensive architecture documentation and build instructions"
-```
+本项目采用 [MIT 许可证](LICENSE) 开源。欢迎 Star、Fork 或提交 Issue / Pull Request！
