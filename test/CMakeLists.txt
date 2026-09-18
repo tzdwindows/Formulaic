@@ -30,3 +30,11 @@ add_formulaic_test(test_window_hook test_window_hook.cpp ${TEST_LIB_TARGET})
 # 4. Custom User Input Scripting, Calculus/FFT & Image Render Test
 add_formulaic_test(test_custom_render test_custom_render.cpp ${TEST_LIB_TARGET})
 
+# 5. Split Window Expression Editor & Live Renderer Test
+add_executable(test_editor_window test_editor_window.cpp)
+target_link_libraries(test_editor_window PRIVATE ${TEST_LIB_TARGET})
+target_include_directories(test_editor_window PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../include)
+set_target_properties(test_editor_window PROPERTIES FOLDER "Tests")
+add_test(NAME test_editor_window COMMAND test_editor_window --automated)
+
+
