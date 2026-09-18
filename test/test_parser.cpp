@@ -134,6 +134,22 @@ int main() {
         auto res_poly = formulaic::Expression::parse("(x + 1)(x - 1)", {"x"});
         TEST_ASSERT(res_poly.has_value(), res_poly.error().format());
         TEST_ASSERT_NEAR(res_poly->eval(5.0), 24.0, 1e-9, "(5+1)(5-1) == 24");
+
+        // x(y + 1) -> x * (y + 1)
+        auto res_xy = formulaic::Expression::parse("x(y + 1)", {"x", "y"});
+        TEST_ASSERT(res_xy.has_value(), res_xy.error().format());
+        TEST_ASSERT_NEAR(res_xy->eval(3.0, 4.0), 15.0, 1e-9, "x(y + 1) == 3 * (4 + 1) == 15");
+
+        // pi(x + 1) -> pi * (x + 1)
+        auto res_pi = formulaic::Expression::parse("pi(x + 1)", {"x"});
+        TEST_ASSERT(res_pi.has_value(), res_pi.error().format());
+        TEST_ASSERT_NEAR(res_pi->eval(2.0), 3.14159265358979323846 * 3.0, 1e-9, "pi(x + 1) == 3*pi");
+
+        // 2x(y + 3) -> 2 * x * (y + 3)
+        auto res_2x = formulaic::Expression::parse("2x(y + 3)", {"x", "y"});
+        TEST_ASSERT(res_2x.has_value(), res_2x.error().format());
+        TEST_ASSERT_NEAR(res_2x->eval(2.0, 5.0), 32.0, 1e-9, "2x(y + 3) == 2 * 2 * 8 == 32");
+
         std::cout << "PASSED\n";
     }
 

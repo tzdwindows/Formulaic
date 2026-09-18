@@ -389,8 +389,16 @@ Result<std::unique_ptr<ASTNode>> Parser::parse_primary() {
         const auto& tok = previous();
         std::string name(tok.text);
 
-        // Check if followed by '(' -> Function call
-        if (check(TokenType::LParen)) {
+        // 1. Check if this is a known function call
+        auto fn_it = kKnownFunctions.find(name);
+        if (fn_it != kKnownFunctions.end()) {
+            if (!check(TokenType::LParen)) {
+                return Diagnostic{
+                    ErrorCode::UnexpectedToken,
+                    "Expected '(' after function name '" + name + "'",
+                    peek().location
+                };
+            }
             advance(); // consume '('
             std::vector<std::unique_ptr<ASTNode>> args;
 
@@ -410,15 +418,6 @@ Result<std::unique_ptr<ASTNode>> Parser::parse_primary() {
                 };
             }
 
-            auto fn_it = kKnownFunctions.find(name);
-            if (fn_it == kKnownFunctions.end()) {
-                return Diagnostic{
-                    ErrorCode::UnknownIdentifier,
-                    "Unknown function: '" + name + "'",
-                    tok.location
-                };
-            }
-
             if (args.size() != fn_it->second) {
                 return Diagnostic{
                     ErrorCode::InvalidArity,
@@ -431,15 +430,26 @@ Result<std::unique_ptr<ASTNode>> Parser::parse_primary() {
             return std::make_unique<FunctionCallNode>(std::move(name), std::move(args), tok.location);
         }
 
-        // Constant replacement (e.g. pi, e, tau, phi)
+        // 2. Constant replacement (e.g. pi, e, tau, phi)
+        // If followed by '(', e.g. pi(x + 1), implicit multiplication will naturally handle it
         auto const_it = kBuiltinConstants.find(name);
         if (const_it != kBuiltinConstants.end()) {
             return std::make_unique<NumberNode>(const_it->second, tok.location);
         }
 
-        // Known variable (e.g. x, y, t)
+        // 3. Known variable (e.g. x, y, t, or declared local variables)
+        // If followed by '(', e.g. x(y + 1), implicit multiplication will naturally handle it
         if (known_variables_.find(name) != known_variables_.end()) {
             return std::make_unique<VariableNode>(std::move(name), tok.location);
+        }
+
+        // 4. Identifier followed by '(' but not a known function -> Unknown function error
+        if (check(TokenType::LParen)) {
+            return Diagnostic{
+                ErrorCode::UnknownIdentifier,
+                "Unknown function: '" + name + "'",
+                tok.location
+            };
         }
 
         return Diagnostic{
