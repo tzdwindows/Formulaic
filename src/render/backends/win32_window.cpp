@@ -1,0 +1,314 @@
+#include <Formulaic/render/window_renderer.hpp>
+
+#if defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#include <windowsx.h>
+#include <chrono>
+
+namespace formulaic {
+
+class Win32WindowRenderer final : public IWindowRenderer {
+public:
+    Win32WindowRenderer() : framebuffer_(800, 600), viewport_(800, 600) {
+        init_bmi(800, 600);
+    }
+
+    ~Win32WindowRenderer() override {
+        detach();
+    }
+
+    bool attach(void* native_handle) override {
+        detach();
+        if (!native_handle) return false;
+
+        hwnd_ = reinterpret_cast<HWND>(native_handle);
+        hdc_ = GetDC(hwnd_);
+        if (!hdc_) return false;
+
+        RECT rc;
+        GetClientRect(hwnd_, &rc);
+        int w = rc.right - rc.left;
+        int h = rc.bottom - rc.top;
+        if (w > 0 && h > 0) {
+            on_resize(w, h);
+        }
+
+        attached_ = true;
+        return true;
+    }
+
+    void detach() override {
+        if (hwnd_ && hdc_) {
+            ReleaseDC(hwnd_, hdc_);
+            hdc_ = nullptr;
+        }
+        hwnd_ = nullptr;
+        attached_ = false;
+    }
+
+    void on_resize(int new_width, int new_height) override {
+        if (new_width <= 0 || new_height <= 0) return;
+        framebuffer_.resize(new_width, new_height);
+        viewport_.set_size(new_width, new_height);
+        init_bmi(new_width, new_height);
+    }
+
+    void render(double time_t) override {
+        hooks_.execute_pre_render(framebuffer_, viewport_, time_t);
+        if (render_callback_) {
+            render_callback_(framebuffer_, viewport_, time_t);
+        }
+        hooks_.execute_post_render(framebuffer_, viewport_, time_t);
+    }
+
+    void present() override {
+        if (!hwnd_ || !hdc_) return;
+
+        // Blit internal 32-bit BGRA surface directly to window DC
+        StretchDIBits(
+            hdc_,
+            0, 0, framebuffer_.width(), framebuffer_.height(),
+            0, 0, framebuffer_.width(), framebuffer_.height(),
+            framebuffer_.data(),
+            &bmi_,
+            DIB_RGB_COLORS,
+            SRCCOPY
+        );
+    }
+
+    void set_render_callback(RenderCallback callback) override {
+        render_callback_ = std::move(callback);
+    }
+
+    [[nodiscard]] FrameBuffer& framebuffer() noexcept override { return framebuffer_; }
+    [[nodiscard]] const FrameBuffer& framebuffer() const noexcept override { return framebuffer_; }
+    [[nodiscard]] Viewport& viewport() noexcept override { return viewport_; }
+    [[nodiscard]] const Viewport& viewport() const noexcept override { return viewport_; }
+    [[nodiscard]] PipelineHooks& hooks() noexcept override { return hooks_; }
+    [[nodiscard]] const PipelineHooks& hooks() const noexcept override { return hooks_; }
+
+    [[nodiscard]] void* native_handle() const noexcept override { return reinterpret_cast<void*>(hwnd_); }
+    [[nodiscard]] bool is_attached() const noexcept override { return attached_; }
+
+private:
+    void init_bmi(int w, int h) {
+        ZeroMemory(&bmi_, sizeof(bmi_));
+        bmi_.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+        bmi_.bmiHeader.biWidth = w;
+        bmi_.bmiHeader.biHeight = -h; // Negative height = top-down DIB, perfectly aligned
+        bmi_.bmiHeader.biPlanes = 1;
+        bmi_.bmiHeader.biBitCount = 32;
+        bmi_.bmiHeader.biCompression = BI_RGB;
+    }
+
+    HWND hwnd_{nullptr};
+    HDC hdc_{nullptr};
+    bool attached_{false};
+
+    FrameBuffer framebuffer_;
+    Viewport viewport_;
+    PipelineHooks hooks_;
+    RenderCallback render_callback_;
+    BITMAPINFO bmi_{};
+};
+
+std::unique_ptr<IWindowRenderer> create_window_renderer() {
+    return std::make_unique<Win32WindowRenderer>();
+}
+
+namespace {
+
+struct WindowState {
+    IWindowRenderer* renderer{nullptr};
+    bool is_dragging{false};
+    int last_mouse_x{0};
+    int last_mouse_y{0};
+};
+
+LRESULT CALLBACK ManagedWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
+    WindowState* state = reinterpret_cast<WindowState*>(GetWindowLongPtr(hwnd, GWLP_USERDATA));
+
+    switch (msg) {
+        case WM_CREATE: {
+            auto* create_struct = reinterpret_cast<CREATESTRUCT*>(lparam);
+            state = reinterpret_cast<WindowState*>(create_struct->lpCreateParams);
+            SetWindowLongPtr(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(state));
+            if (state && state->renderer) {
+                state->renderer->attach(hwnd);
+            }
+            return 0;
+        }
+
+        case WM_SIZE: {
+            int w = LOWORD(lparam);
+            int h = HIWORD(lparam);
+            if (state && state->renderer && w > 0 && h > 0) {
+                state->renderer->on_resize(w, h);
+                state->renderer->render(0.0);
+                state->renderer->present();
+            }
+            return 0;
+        }
+
+        case WM_ERASEBKGND:
+            return 1; // Prevent flickering
+
+        case WM_PAINT: {
+            PAINTSTRUCT ps;
+            BeginPaint(hwnd, &ps);
+            if (state && state->renderer) {
+                state->renderer->present();
+            }
+            EndPaint(hwnd, &ps);
+            return 0;
+        }
+
+        case WM_LBUTTONDOWN: {
+            if (state) {
+                state->is_dragging = true;
+                state->last_mouse_x = GET_X_LPARAM(lparam);
+                state->last_mouse_y = GET_Y_LPARAM(lparam);
+                SetCapture(hwnd);
+            }
+            return 0;
+        }
+
+        case WM_LBUTTONUP: {
+            if (state && state->is_dragging) {
+                state->is_dragging = false;
+                ReleaseCapture();
+            }
+            return 0;
+        }
+
+        case WM_MOUSEMOVE: {
+            if (state && state->is_dragging && state->renderer) {
+                int mx = GET_X_LPARAM(lparam);
+                int my = GET_Y_LPARAM(lparam);
+                int dx = mx - state->last_mouse_x;
+                int dy = my - state->last_mouse_y;
+                state->last_mouse_x = mx;
+                state->last_mouse_y = my;
+
+                state->renderer->viewport().pan(dx, dy);
+                state->renderer->render(0.0);
+                state->renderer->present();
+            }
+            return 0;
+        }
+
+        case WM_MOUSEWHEEL: {
+            if (state && state->renderer) {
+                int delta = GET_WHEEL_DELTA_WPARAM(wparam);
+                double factor = (delta > 0) ? 1.15 : (1.0 / 1.15);
+
+                POINT pt{GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
+                ScreenToClient(hwnd, &pt);
+
+                state->renderer->viewport().zoom(factor, {static_cast<double>(pt.x), static_cast<double>(pt.y)});
+                state->renderer->render(0.0);
+                state->renderer->present();
+            }
+            return 0;
+        }
+
+        case WM_LBUTTONDBLCLK: {
+            if (state && state->renderer) {
+                state->renderer->viewport().set_bounds(Rect2D(-10.0, 10.0, -10.0, 10.0));
+                state->renderer->render(0.0);
+                state->renderer->present();
+            }
+            return 0;
+        }
+
+        case WM_DESTROY:
+            PostQuitMessage(0);
+            return 0;
+    }
+
+    return DefWindowProcA(hwnd, msg, wparam, lparam);
+}
+
+} // anonymous namespace
+
+Win32WindowHandle create_win32_window(
+    const Win32WindowDesc& desc,
+    IWindowRenderer* renderer
+) {
+    HINSTANCE hinstance = GetModuleHandle(nullptr);
+    const char* class_name = "FormulaicRenderWindowClass";
+
+    WNDCLASSEXA wc{};
+    wc.cbSize = sizeof(WNDCLASSEXA);
+    wc.style = CS_HREDRAW | CS_VREDRAW | CS_DBLCLKS;
+    wc.lpfnWndProc = ManagedWndProc;
+    wc.hInstance = hinstance;
+    wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
+    wc.hbrBackground = nullptr;
+    wc.lpszClassName = class_name;
+
+    RegisterClassExA(&wc);
+
+    auto* state = new WindowState();
+    state->renderer = renderer;
+
+    HWND hwnd = CreateWindowExA(
+        0,
+        class_name,
+        desc.title.c_str(),
+        WS_OVERLAPPEDWINDOW,
+        CW_USEDEFAULT, CW_USEDEFAULT,
+        desc.width, desc.height,
+        nullptr,
+        nullptr,
+        hinstance,
+        state
+    );
+
+    if (hwnd && desc.show) {
+        ShowWindow(hwnd, SW_SHOW);
+        UpdateWindow(hwnd);
+    }
+
+    return Win32WindowHandle{reinterpret_cast<void*>(hwnd), reinterpret_cast<void*>(hinstance)};
+}
+
+void destroy_win32_window(Win32WindowHandle handle) {
+    if (handle.hwnd) {
+        HWND hwnd = reinterpret_cast<HWND>(handle.hwnd);
+        WindowState* state = reinterpret_cast<WindowState*>(GetWindowLongPtr(hwnd, GWLP_USERDATA));
+        DestroyWindow(hwnd);
+        delete state;
+    }
+}
+
+void run_win32_message_loop(IWindowRenderer* renderer, bool run_animation) {
+    MSG msg{};
+    auto start_time = std::chrono::high_resolution_clock::now();
+
+    while (msg.message != WM_QUIT) {
+        if (PeekMessageA(&msg, nullptr, 0, 0, PM_REMOVE)) {
+            TranslateMessage(&msg);
+            DispatchMessageA(&msg);
+        } else {
+            if (run_animation && renderer && renderer->is_attached()) {
+                auto now = std::chrono::high_resolution_clock::now();
+                double elapsed = std::chrono::duration<double>(now - start_time).count();
+                renderer->render(elapsed);
+                renderer->present();
+            } else {
+                WaitMessage();
+            }
+        }
+    }
+}
+
+} // namespace formulaic
+
+#endif // _WIN32
