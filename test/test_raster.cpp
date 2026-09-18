@@ -1,0 +1,187 @@
+#include <Formulaic/parser/expression.hpp>
+#include <Formulaic/render/color.hpp>
+#include <Formulaic/render/frame_stream.hpp>
+#include <Formulaic/render/framebuffer.hpp>
+#include <Formulaic/render/image_export.hpp>
+#include <Formulaic/render/raster_engine.hpp>
+#include <Formulaic/render/viewport.hpp>
+#include <cmath>
+#include <filesystem>
+#include <fstream>
+#include <iostream>
+
+#define TEST_ASSERT(cond, msg) \
+    do { \
+        if (!(cond)) { \
+            std::cerr << "Assertion failed: [" << #cond << "] " << (msg) \
+                      << " at " << __FILE__ << ":" << __LINE__ << std::endl; \
+            return 1; \
+        } \
+    } while (0)
+
+int main() {
+    std::cout << "=========================================\n";
+    std::cout << " Running Offline Raster & Exporter Tests \n";
+    std::cout << "=========================================\n";
+
+    const std::filesystem::path output_dir = "test_output";
+    std::filesystem::create_directories(output_dir);
+
+    // 1. FrameBuffer basic operations & pixel manipulation
+    {
+        std::cout << "[Test 1] FrameBuffer Primitives & Blending... ";
+        formulaic::FrameBuffer fb(200, 150, formulaic::Color::Black);
+        TEST_ASSERT(fb.width() == 200, "Width match");
+        TEST_ASSERT(fb.height() == 150, "Height match");
+
+        fb.set_pixel(10, 20, formulaic::Color::Red);
+        auto c = fb.get_pixel(10, 20);
+        TEST_ASSERT(c.r == formulaic::Color::Red.r && c.g == formulaic::Color::Red.g && c.b == formulaic::Color::Red.b, "Pixel readback");
+
+        // Alpha blending test
+        fb.blend_pixel(10, 20, formulaic::Color(0, 0, 255, 128), formulaic::BlendMode::AlphaBlend);
+        auto blended = fb.get_pixel(10, 20);
+        TEST_ASSERT(blended.r > 0 && blended.b > 0, "Blended red and blue channels");
+
+        // Lines and shapes
+        fb.draw_line(0, 0, 199, 149, formulaic::Color::White);
+        fb.draw_circle(100, 75, 30, formulaic::Color::Green);
+        fb.fill_circle(100, 75, 10, formulaic::Color::Yellow);
+        fb.draw_text(10, 10, "Formulaic Engine", formulaic::Color::Cyan);
+
+        std::cout << "PASSED\n";
+    }
+
+    // 2. Explicit 1D Function Rasterization y = sin(x) * x
+    {
+        std::cout << "[Test 2] Explicit 1D Plotting & BMP Export... ";
+        formulaic::FrameBuffer fb(800, 600, formulaic::Color::BackgroundDark);
+        formulaic::Viewport vp(800, 600, formulaic::Rect2D(-10.0, 10.0, -10.0, 10.0));
+        formulaic::RasterEngine engine;
+
+        engine.render_grid(fb, vp);
+
+        auto expr = formulaic::Expression::parse("sin(x) * x", {"x"});
+        TEST_ASSERT(expr.has_value(), expr.error().format());
+        engine.plot_explicit(fb, vp, expr.value(), formulaic::Color::NeonBlue, 2);
+
+        auto bmp_path = output_dir / "test_explicit_sin_x.bmp";
+        auto res = formulaic::ImageExport::save_bmp(fb, bmp_path);
+        TEST_ASSERT(res.has_value(), res.error().format());
+        TEST_ASSERT(std::filesystem::exists(bmp_path), "BMP file must exist");
+        TEST_ASSERT(std::filesystem::file_size(bmp_path) > 1000, "BMP file must have non-trivial size");
+
+        std::cout << "PASSED -> Saved to " << bmp_path.string() << "\n";
+    }
+
+    // 3. Parametric 2D Curve Rasterization (Lissajous: x = sin(3t), y = sin(4t))
+    {
+        std::cout << "[Test 3] Parametric 2D Curve Plotting... ";
+        formulaic::FrameBuffer fb(800, 600, formulaic::Color::BackgroundDark);
+        formulaic::Viewport vp(800, 600, formulaic::Rect2D(-2.0, 2.0, -2.0, 2.0));
+        formulaic::RasterEngine engine;
+
+        engine.render_grid(fb, vp);
+
+        auto expr_x = formulaic::Expression::parse("sin(3 * t)", {"t"});
+        auto expr_y = formulaic::Expression::parse("sin(4 * t)", {"t"});
+        TEST_ASSERT(expr_x.has_value() && expr_y.has_value(), "Parametric expressions parsed");
+
+        engine.plot_parametric(fb, vp, expr_x.value(), expr_y.value(), 0.0, 6.283185307, 2000,
+                               formulaic::Color::NeonPink, 2);
+
+        auto bmp_path = output_dir / "test_parametric_lissajous.bmp";
+        auto res = formulaic::ImageExport::save_bmp(fb, bmp_path);
+        TEST_ASSERT(res.has_value(), res.error().format());
+        TEST_ASSERT(std::filesystem::exists(bmp_path), "Parametric BMP exists");
+
+        std::cout << "PASSED -> Saved to " << bmp_path.string() << "\n";
+    }
+
+    // 4. Implicit 2D Function Rasterization f(x, y) = x^2 + y^2 - 25 = 0 (Circle R=5)
+    {
+        std::cout << "[Test 4] Implicit Function Marching Squares... ";
+        formulaic::FrameBuffer fb(800, 600, formulaic::Color::BackgroundDark);
+        formulaic::Viewport vp(800, 600, formulaic::Rect2D(-8.0, 8.0, -8.0, 8.0));
+        formulaic::RasterEngine engine;
+
+        engine.render_grid(fb, vp);
+
+        auto expr = formulaic::Expression::parse("x^2 + y^2 - 25", {"x", "y"});
+        TEST_ASSERT(expr.has_value(), expr.error().format());
+        engine.plot_implicit(fb, vp, expr.value(), formulaic::Color::NeonGreen, 2);
+
+        auto bmp_path = output_dir / "test_implicit_circle.bmp";
+        auto res = formulaic::ImageExport::save_bmp(fb, bmp_path);
+        TEST_ASSERT(res.has_value(), res.error().format());
+        TEST_ASSERT(std::filesystem::exists(bmp_path), "Implicit BMP exists");
+
+        std::cout << "PASSED -> Saved to " << bmp_path.string() << "\n";
+    }
+
+    // 5. Scalar Field 2D Heatmap
+    {
+        std::cout << "[Test 5] Scalar Field Heatmap Rasterization... ";
+        formulaic::FrameBuffer fb(400, 300, formulaic::Color::BackgroundDark);
+        formulaic::Viewport vp(400, 300, formulaic::Rect2D(-4.0, 4.0, -3.0, 3.0));
+        formulaic::RasterEngine engine;
+
+        auto expr = formulaic::Expression::parse("sin(x) * cos(y)", {"x", "y"});
+        TEST_ASSERT(expr.has_value(), expr.error().format());
+        engine.plot_scalar_field(fb, vp, expr.value(), formulaic::ColormapType::Viridis, -1.0, 1.0);
+
+        auto bmp_path = output_dir / "test_scalar_field.bmp";
+        auto res = formulaic::ImageExport::save_bmp(fb, bmp_path);
+        TEST_ASSERT(res.has_value(), res.error().format());
+
+        // Test raw RGBA export
+        auto raw_path = output_dir / "test_scalar_field.raw";
+        auto raw_res = formulaic::ImageExport::save_raw_rgba(fb, raw_path);
+        TEST_ASSERT(raw_res.has_value(), raw_res.error().format());
+        TEST_ASSERT(std::filesystem::file_size(raw_path) == 400 * 300 * 4, "Raw size matches 400x300x4");
+
+        std::cout << "PASSED -> Saved to " << bmp_path.string() << "\n";
+    }
+
+    // 6. FrameStream Multi-frame Animation Generator
+    {
+        std::cout << "[Test 6] FrameStream Time-step Animation Sequence... ";
+        formulaic::FrameStream stream(400, 300, 0.0, 0.2, 20.0); // 5 frames
+        TEST_ASSERT(stream.total_frames() == 5, "Total frame count == 5");
+
+        auto expr = formulaic::Expression::parse("sin(x + 5 * t)", {"x", "t"});
+        TEST_ASSERT(expr.has_value(), expr.error().format());
+        formulaic::RasterEngine engine;
+        formulaic::Viewport vp(400, 300, formulaic::Rect2D(-5.0, 5.0, -2.0, 2.0));
+
+        size_t frames_rendered = 0;
+        stream.generate(
+            [&](formulaic::FrameBuffer& fb, double time, size_t idx) {
+                fb.clear(formulaic::Color::BackgroundDark);
+                engine.render_grid(fb, vp);
+                engine.plot_explicit(fb, vp, expr.value(), formulaic::Color::NeonPink, 2, time);
+            },
+            [&](const formulaic::Frame& frame) -> bool {
+                frames_rendered++;
+                return true;
+            }
+        );
+        TEST_ASSERT(frames_rendered == 5, "Rendered exactly 5 frames");
+
+        // Dump to directory
+        auto dump_res = stream.dump_to_directory(
+            output_dir / "stream_frames",
+            "frame",
+            [&](formulaic::FrameBuffer& fb, double time, size_t idx) {
+                fb.clear(formulaic::Color::BackgroundDark);
+                engine.render_grid(fb, vp);
+                engine.plot_explicit(fb, vp, expr.value(), formulaic::Color::NeonBlue, 2, time);
+            }
+        );
+        TEST_ASSERT(dump_res.has_value() && dump_res.value() == 5, "Dumped 5 frames to disk");
+        std::cout << "PASSED (5 continuous frames generated)\n";
+    }
+
+    std::cout << "\n>>> All Offline Raster & Exporter Tests PASSED successfully! <<<\n";
+    return 0;
+}
