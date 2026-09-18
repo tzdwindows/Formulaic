@@ -184,6 +184,10 @@ static void update_expression_from_edit(EditorWindowState* state) {
     GetWindowTextA(state->hwnd_edit, buffer, sizeof(buffer) - 1);
     std::string text(buffer);
 
+    while (!text.empty() && (text.back() == ' ' || text.back() == '\t' || text.back() == '\r' || text.back() == '\n')) {
+        text.pop_back();
+    }
+
     if (text.empty()) {
         state->is_valid_expr = false;
         state->error_message = "Enter a formula or variable script";
@@ -191,7 +195,67 @@ static void update_expression_from_edit(EditorWindowState* state) {
         return;
     }
 
-    auto parse_res = formulaic::Expression::parse(text);
+    // Check if user entered an equation LHS = RHS (excluding let/var declarations)
+    bool is_equation = false;
+    std::string eq_lhs, eq_rhs;
+    {
+        size_t start_idx = 0;
+        while (start_idx < text.size() && (text[start_idx] == ' ' || text[start_idx] == '\t' || text[start_idx] == '\r' || text[start_idx] == '\n')) ++start_idx;
+        std::string_view prefix = std::string_view(text).substr(start_idx, 4);
+        if (prefix != "let " && prefix != "var ") {
+            int paren = 0;
+            for (size_t p = 0; p < text.size(); ++p) {
+                if (text[p] == '(') ++paren;
+                else if (text[p] == ')') { if (paren > 0) --paren; }
+                else if (paren == 0 && text[p] == '=') {
+                    if (p > 0 && (text[p-1] == '!' || text[p-1] == '<' || text[p-1] == '>')) continue;
+                    size_t eq_len = (p + 1 < text.size() && text[p+1] == '=') ? 2 : 1;
+                    eq_lhs = text.substr(0, p);
+                    eq_rhs = text.substr(p + eq_len);
+                    is_equation = true;
+                    break;
+                }
+            }
+        }
+    }
+
+    formulaic::Result<formulaic::Expression> parse_res = formulaic::Expression::parse(text);
+
+    if (is_equation) {
+        auto trim_str = [](std::string s) -> std::string {
+            while (!s.empty() && (s.front() == ' ' || s.front() == '\t' || s.front() == '\r' || s.front() == '\n')) s.erase(0, 1);
+            while (!s.empty() && (s.back() == ' ' || s.back() == '\t' || s.back() == '\r' || s.back() == '\n' || s.back() == ';')) s.pop_back();
+            return s;
+        };
+        eq_lhs = trim_str(eq_lhs);
+        eq_rhs = trim_str(eq_rhs);
+
+        // Special case: y = f(x) -> 1D explicit curve
+        if (eq_lhs == "y") {
+            auto rhs_res = formulaic::Expression::parse(eq_rhs);
+            if (rhs_res.has_value() && !rhs_res->references_variable("y")) {
+                parse_res = std::move(rhs_res);
+                state->plot_mode = PlotMode::Explicit1D;
+                if (state->hwnd_combo_mode) {
+                    SendMessageA(state->hwnd_combo_mode, CB_SETCURSEL, static_cast<WPARAM>(PlotMode::Explicit1D), 0);
+                }
+            } else {
+                parse_res = formulaic::Expression::parse_equation(text);
+                state->plot_mode = PlotMode::Implicit2D;
+                if (state->hwnd_combo_mode) {
+                    SendMessageA(state->hwnd_combo_mode, CB_SETCURSEL, static_cast<WPARAM>(PlotMode::Implicit2D), 0);
+                }
+            }
+        } else {
+            // General equation: LHS = RHS -> implicit (LHS) - (RHS) = 0
+            parse_res = formulaic::Expression::parse_equation(text);
+            state->plot_mode = PlotMode::Implicit2D;
+            if (state->hwnd_combo_mode) {
+                SendMessageA(state->hwnd_combo_mode, CB_SETCURSEL, static_cast<WPARAM>(PlotMode::Implicit2D), 0);
+            }
+        }
+    }
+
     if (!parse_res) {
         state->is_valid_expr = false;
         state->error_message = "Error: " + parse_res.error().format();
@@ -215,8 +279,17 @@ static void update_expression_from_edit(EditorWindowState* state) {
         }
     }
 
-    std::string status_info = "Status: Valid | " + var_summary;
-    status_info += " | Bytecode: " + std::to_string(state->current_expr.bytecode().instructions.size()) + " insts";
+    std::string status_info;
+    if (is_equation) {
+        if (eq_rhs == "0" && (eq_lhs == "x^2 + y^2" || eq_lhs == "x^2+y^2" || eq_lhs == "x*x + y*y" || eq_lhs == "x*x+y*y")) {
+            status_info = "Status: Valid Equation (x^2+y^2=0) [Implicit Mode]\nNote: x^2+y^2=0 is a single point (0,0). For a visible circle try: x^2+y^2=4";
+        } else {
+            status_info = "Status: Valid Equation (" + eq_lhs + " = " + eq_rhs + ") [Implicit Mode] | " + var_summary;
+        }
+    } else {
+        status_info = "Status: Valid | " + var_summary;
+        status_info += " | Bytecode: " + std::to_string(state->current_expr.bytecode().instructions.size()) + " insts";
+    }
     if (state->uses_time_t) status_info += " [Animated]";
     SetWindowTextA(state->hwnd_status, status_info.c_str());
 

@@ -46,7 +46,9 @@ static bool render_custom_formula_to_image(
     double y_min = -5.0,
     double y_max = 5.0
 ) {
-    auto expr_res = formulaic::Expression::parse(formula_text);
+    bool is_equation = (formula_text.find('=') != std::string::npos && formula_text.find("let ") != 0);
+    auto expr_res = is_equation ? formulaic::Expression::parse_equation(formula_text)
+                                : formulaic::Expression::parse(formula_text);
     if (!expr_res) {
         std::cerr << "Parse error: " << expr_res.error().format() << std::endl;
         return false;
@@ -64,8 +66,7 @@ static bool render_custom_formula_to_image(
     grid_style.show_labels = true;
     engine.render_grid(fb, vp, grid_style);
 
-    // Determine whether to plot as explicit 1D curve or 2D scalar field/heatmap
-    // If expression references 'y', render as 2D scalar field heatmap; otherwise as 1D curve
+    // Determine whether to plot as explicit 1D curve, implicit contour, or 2D scalar field/heatmap
     bool has_y = false;
     for (const auto& var : expr.variables()) {
         if (var == "y") {
@@ -74,7 +75,9 @@ static bool render_custom_formula_to_image(
         }
     }
 
-    if (has_y) {
+    if (is_equation) {
+        engine.plot_implicit(fb, vp, expr, formulaic::Color::NeonPink, 2.5);
+    } else if (has_y) {
         engine.plot_scalar_field(fb, vp, expr, formulaic::ColormapType::Viridis, -2.0, 2.0);
     } else {
         engine.plot_explicit(fb, vp, expr, formulaic::Color::NeonBlue, 2.5);
@@ -284,6 +287,31 @@ int main(int argc, char* argv[]) {
             }
         }
         TEST_ASSERT(max_bin == 8, "Peak detected at 8 Hz bin");
+
+        std::cout << "PASSED\n";
+    }
+
+    // -------------------------------------------------------------------------
+    // Test 6: Equation Syntax & Implicit Rendering (x^2 + y^2 = 4)
+    // -------------------------------------------------------------------------
+    {
+        std::cout << "[Test 6] Equation Syntax Parsing & Rendering (x^2 + y^2 = 4)... ";
+        const std::string circle_eq = "x^2 + y^2 = 4";
+        const auto out_file = output_dir / "custom_render_circle_equation.bmp";
+        bool ok = render_custom_formula_to_image(circle_eq, out_file, 640, 480, -3.0, 3.0, -3.0, 3.0);
+        TEST_ASSERT(ok, "Render circle equation x^2 + y^2 = 4");
+        TEST_ASSERT(std::filesystem::exists(out_file), "Circle BMP output exists");
+        TEST_ASSERT(std::filesystem::file_size(out_file) > 1000, "Circle BMP output is non-empty");
+
+        // Also test equation parsing directly
+        auto eq_res = formulaic::Expression::parse_equation("x^2 + y^2 = 4");
+        TEST_ASSERT(eq_res.has_value(), "parse_equation succeeds for x^2 + y^2 = 4");
+        // At (2, 0), x^2 + y^2 - 4 == 0
+        TEST_ASSERT_NEAR(eq_res->eval(2.0, 0.0), 0.0, 1e-12, "Circle zero level set at (2,0)");
+        // At (0, 0), x^2 + y^2 - 4 == -4
+        TEST_ASSERT_NEAR(eq_res->eval(0.0, 0.0), -4.0, 1e-12, "Circle interior at (0,0)");
+        // At (3, 0), x^2 + y^2 - 4 == 5
+        TEST_ASSERT_NEAR(eq_res->eval(3.0, 0.0), 5.0, 1e-12, "Circle exterior at (3,0)");
 
         std::cout << "PASSED\n";
     }

@@ -36,6 +36,57 @@ Result<Expression> Expression::parse(
     return Expression(std::string(expression_text), std::move(program_res.value()));
 }
 
+Result<Expression> Expression::parse_equation(
+    std::string_view equation_text,
+    const std::vector<std::string>& variable_names
+) {
+    int paren_depth = 0;
+    size_t eq_pos = std::string_view::npos;
+    size_t eq_len = 0;
+
+    for (size_t i = 0; i < equation_text.size(); ++i) {
+        char c = equation_text[i];
+        if (c == '(') {
+            ++paren_depth;
+        } else if (c == ')') {
+            if (paren_depth > 0) --paren_depth;
+        } else if (paren_depth == 0) {
+            if (c == '=' && i > 0 && (equation_text[i-1] == '!' || equation_text[i-1] == '<' || equation_text[i-1] == '>')) {
+                continue;
+            }
+            if (c == '=') {
+                eq_pos = i;
+                eq_len = (i + 1 < equation_text.size() && equation_text[i+1] == '=') ? 2 : 1;
+                break;
+            }
+        }
+    }
+
+    if (eq_pos == std::string_view::npos) {
+        return parse(equation_text, variable_names);
+    }
+
+    auto trim = [](std::string_view s) -> std::string_view {
+        while (!s.empty() && (s.front() == ' ' || s.front() == '\t' || s.front() == '\r' || s.front() == '\n')) {
+            s.remove_prefix(1);
+        }
+        while (!s.empty() && (s.back() == ' ' || s.back() == '\t' || s.back() == '\r' || s.back() == '\n' || s.back() == ';')) {
+            s.remove_suffix(1);
+        }
+        return s;
+    };
+
+    std::string_view lhs = trim(equation_text.substr(0, eq_pos));
+    std::string_view rhs = trim(equation_text.substr(eq_pos + eq_len));
+
+    if (lhs.empty() || rhs.empty()) {
+        return parse(equation_text, variable_names);
+    }
+
+    std::string implicit_expr = "(" + std::string(lhs) + ") - (" + std::string(rhs) + ")";
+    return parse(implicit_expr, variable_names);
+}
+
 double Expression::evaluate(std::span<const double> variables) const noexcept {
     if (program_.instructions.empty()) return 0.0;
     return BytecodeVM::evaluate(program_, variables);

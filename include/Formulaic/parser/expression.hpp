@@ -20,6 +20,12 @@ public:
         const std::vector<std::string>& variable_names = {"x", "y", "t"}
     );
 
+    // Parses mathematical equation LHS = RHS or LHS == RHS into an implicit function (LHS) - (RHS)
+    [[nodiscard]] static Result<Expression> parse_equation(
+        std::string_view equation_text,
+        const std::vector<std::string>& variable_names = {"x", "y", "t"}
+    );
+
     // High frequency evaluation with zero heap allocation
     [[nodiscard]] double evaluate(std::span<const double> variables) const noexcept;
 
