@@ -77,4 +77,30 @@ std::vector<double> Expression::compute_spectrum(double t_start, double t_end, s
     return math::FFT::sample_and_spectrum(*this, t_start, t_end, sample_count);
 }
 
+bool Expression::references_variable(std::string_view name) const noexcept {
+    const size_t var_count = program_.variable_names.size();
+    for (const auto& inst : program_.instructions) {
+        if (inst.op == Opcode::LOAD_VAR && inst.operand < var_count) {
+            if (program_.variable_names[inst.operand] == name) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+std::vector<std::string> Expression::referenced_variables() const {
+    std::vector<std::string> result;
+    const size_t var_count = program_.variable_names.size();
+    for (const auto& inst : program_.instructions) {
+        if (inst.op == Opcode::LOAD_VAR && inst.operand < var_count) {
+            const auto& var_name = program_.variable_names[inst.operand];
+            if (std::find(result.begin(), result.end(), var_name) == result.end()) {
+                result.push_back(var_name);
+            }
+        }
+    }
+    return result;
+}
+
 } // namespace formulaic

@@ -38,6 +38,10 @@ void RasterEngine::render_grid(
     const PipelineHooks* hooks
 ) const {
     (void)hooks;
+    if (style.background_color.a > 0) {
+        fb.clear(style.background_color);
+    }
+
     const Rect2D& b = vp.bounds();
     const double x_step = calculate_nice_step(b.width(), style.major_divisions);
     const double y_step = calculate_nice_step(b.height(), style.major_divisions);

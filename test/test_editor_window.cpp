@@ -203,12 +203,16 @@ static void update_expression_from_edit(EditorWindowState* state) {
     state->is_valid_expr = true;
     state->error_message.clear();
 
-    // Check if time variable 't' is referenced for animation
-    state->uses_time_t = false;
+    // Check if time variable 't' is actually referenced for animation
+    state->uses_time_t = state->current_expr.references_variable("t");
     std::string var_summary = "Vars: ";
-    for (const auto& v : state->current_expr.variables()) {
-        var_summary += v + " ";
-        if (v == "t") state->uses_time_t = true;
+    auto actual_vars = state->current_expr.referenced_variables();
+    if (actual_vars.empty()) {
+        var_summary += "none";
+    } else {
+        for (const auto& v : actual_vars) {
+            var_summary += v + " ";
+        }
     }
 
     std::string status_info = "Status: Valid | " + var_summary;
@@ -524,6 +528,8 @@ int main(int argc, char* argv[]) {
 
     // Setup custom render callback
     state->renderer->set_render_callback([s = state.get()](formulaic::FrameBuffer& fb, const formulaic::Viewport& vp, double time_t) {
+        fb.clear(formulaic::Color::BackgroundDark);
+
         formulaic::GridStyle grid_style;
         grid_style.background_color = formulaic::Color::BackgroundDark;
         grid_style.show_grid = true;
@@ -535,10 +541,7 @@ int main(int argc, char* argv[]) {
 
         PlotMode mode = s->plot_mode;
         if (mode == PlotMode::Auto) {
-            bool has_y = false;
-            for (const auto& var : s->current_expr.variables()) {
-                if (var == "y") { has_y = true; break; }
-            }
+            bool has_y = s->current_expr.references_variable("y");
             mode = has_y ? PlotMode::ScalarField2D : PlotMode::Explicit1D;
         }
 

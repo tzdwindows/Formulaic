@@ -54,6 +54,8 @@ public:
 
     [[nodiscard]] const std::string& source() const noexcept { return source_; }
     [[nodiscard]] const std::vector<std::string>& variables() const noexcept { return program_.variable_names; }
+    [[nodiscard]] bool references_variable(std::string_view name) const noexcept;
+    [[nodiscard]] std::vector<std::string> referenced_variables() const;
     [[nodiscard]] const BytecodeProgram& bytecode() const noexcept { return program_; }
     [[nodiscard]] std::string disassemble() const { return program_.disassemble(); }
     [[nodiscard]] bool is_valid() const noexcept { return !program_.instructions.empty(); }
