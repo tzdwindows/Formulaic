@@ -1,0 +1,69 @@
+# ==============================================================================
+# Git Ignore for Formulaic C++ Project
+# Target: Visual Studio, MSVC, CMake, vcpkg, Windows & Cross-platform builds
+# ==============================================================================
+
+# --- Visual Studio & MSVC Cache / Metadata ---
+.vs/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.VC.db
+*.VC.opendb
+*.VC.opendb-wal
+*.VC.opendb-shm
+.vscode/
+
+# --- MSVC Compiler & Linker Outputs ---
+*.obj
+*.o
+*.ilk
+*.pdb
+*.tlog
+*.idb
+*.res
+*.exp
+*.lib
+*.dll
+*.exe
+*.manifest
+*.pch
+*.ipch
+
+# --- CMake Build Directories & Artifacts ---
+build/
+build-*/
+out/
+bin/
+lib/
+cmake-build-*/
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+CTestTestfile.cmake
+Testing/
+compile_commands.json
+
+# --- vcpkg Dependencies & Artifacts ---
+vcpkg_installed/
+installed/
+.vcpkg-root
+
+# --- Test Outputs & Generated Artifacts ---
+test_output/
+*.bmp
+*.png
+*.ppm
+*.raw
+!test/fixtures/**
+
+# --- System & Editor Temporary Files ---
+Thumbs.db
+Desktop.ini
+.DS_Store
+*.tmp
+*.bak
+*.swp
+*~
