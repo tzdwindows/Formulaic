@@ -26,3 +26,7 @@ add_formulaic_test(test_raster test_raster.cpp ${TEST_LIB_TARGET})
 
 # 3. Native Window Binding & Pipeline Hooks Integration Test
 add_formulaic_test(test_window_hook test_window_hook.cpp ${TEST_LIB_TARGET})
+
+# 4. Custom User Input Scripting, Calculus/FFT & Image Render Test
+add_formulaic_test(test_custom_render test_custom_render.cpp ${TEST_LIB_TARGET})
+

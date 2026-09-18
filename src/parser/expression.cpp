@@ -1,4 +1,6 @@
 #include <Formulaic/parser/expression.hpp>
+#include <Formulaic/math/calculus.hpp>
+#include <Formulaic/math/fft.hpp>
 #include "bytecode_compiler.hpp"
 #include "bytecode_vm.hpp"
 #include "lexer.hpp"
@@ -61,6 +63,18 @@ void Expression::evaluate_grid(
             out_buffer[row_offset + xi] = BytecodeVM::evaluate(program_, std::span<const double, 3>(vars));
         }
     }
+}
+
+double Expression::differentiate(double x, double h) const noexcept {
+    return math::Calculus::differentiate(*this, x, h);
+}
+
+double Expression::integrate(double a, double b, size_t steps) const noexcept {
+    return math::Calculus::integrate(*this, a, b, steps);
+}
+
+std::vector<double> Expression::compute_spectrum(double t_start, double t_end, size_t sample_count) const {
+    return math::FFT::sample_and_spectrum(*this, t_start, t_end, sample_count);
 }
 
 } // namespace formulaic

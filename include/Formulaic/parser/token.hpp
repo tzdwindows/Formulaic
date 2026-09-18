@@ -32,10 +32,16 @@ enum class TokenType {
     PipePipe,       // ||
     Exclamation,    // !
     
-    // Delimiters
+    // Delimiters & Statements
     LParen,         // (
     RParen,         // )
     Comma,          // ,
+    Semicolon,      // ;
+    Equal,          // =
+
+    // Keywords
+    KeywordLet,     // let
+    KeywordVar,     // var
 
     Invalid
 };
@@ -70,6 +76,10 @@ struct Token {
         case TokenType::LParen: return "(";
         case TokenType::RParen: return ")";
         case TokenType::Comma: return ",";
+        case TokenType::Semicolon: return ";";
+        case TokenType::Equal: return "=";
+        case TokenType::KeywordLet: return "let";
+        case TokenType::KeywordVar: return "var";
         case TokenType::Invalid: return "Invalid";
         default: return "Unknown";
     }

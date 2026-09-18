@@ -39,6 +39,8 @@ set(FORMULAIC_PUBLIC_HEADERS
     include/Formulaic/render/window_renderer.hpp
     include/Formulaic/hooks/hooks.hpp
     include/Formulaic/hooks/pipeline_hooks.hpp
+    include/Formulaic/math/calculus.hpp
+    include/Formulaic/math/fft.hpp
     include/Formulaic/utils/timer.hpp
 )
 
@@ -52,6 +54,8 @@ set(FORMULAIC_SOURCES
     src/parser/bytecode_vm.hpp
     src/parser/bytecode_vm.cpp
     src/parser/expression.cpp
+    src/math/calculus.cpp
+    src/math/fft.cpp
     src/render/color.cpp
     src/render/framebuffer.cpp
     src/render/image_export.cpp

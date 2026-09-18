@@ -54,6 +54,17 @@ uint16_t BytecodeCompiler::add_constant(double value) {
     return static_cast<uint16_t>(program_.constants.size() - 1);
 }
 
+uint16_t BytecodeCompiler::declare_variable(std::string_view name) {
+    auto it = var_to_index_.find(std::string(name));
+    if (it != var_to_index_.end()) {
+        return it->second;
+    }
+    uint16_t idx = static_cast<uint16_t>(program_.variable_names.size());
+    program_.variable_names.emplace_back(name);
+    var_to_index_[std::string(name)] = idx;
+    return idx;
+}
+
 Result<uint16_t> BytecodeCompiler::get_variable_index(std::string_view name, const SourceLocation& loc) {
     auto it = var_to_index_.find(std::string(name));
     if (it == var_to_index_.end()) {
@@ -104,6 +115,71 @@ Result<void> BytecodeCompiler::compile_node(const ASTNode& node) {
         if (!idx_res) return idx_res.error();
         emit(Opcode::LOAD_VAR, idx_res.value());
         adjust_stack(1);
+        return {};
+    }
+
+    if (const auto* decl = dynamic_cast<const VarDeclNode*>(&node)) {
+        if (decl->initializer) {
+            auto res = compile_node(*decl->initializer);
+            if (!res) return res;
+        } else {
+            uint16_t zero_idx = add_constant(0.0);
+            emit(Opcode::CONSTANT, zero_idx);
+            adjust_stack(1);
+        }
+        uint16_t idx = declare_variable(decl->name);
+        emit(Opcode::STORE_VAR, idx);
+        adjust_stack(-1);
+        return {};
+    }
+
+    if (const auto* assign = dynamic_cast<const AssignmentNode*>(&node)) {
+        auto res = compile_node(*assign->value);
+        if (!res) return res;
+        uint16_t idx = declare_variable(assign->name);
+        emit(Opcode::STORE_VAR, idx);
+        adjust_stack(-1);
+        return {};
+    }
+
+    if (const auto* blk = dynamic_cast<const BlockNode*>(&node)) {
+        for (const auto& stmt : blk->statements) {
+            auto res = compile_node(*stmt);
+            if (!res) return res;
+            if (!dynamic_cast<const VarDeclNode*>(stmt.get()) &&
+                !dynamic_cast<const AssignmentNode*>(stmt.get())) {
+                emit(Opcode::POP);
+                adjust_stack(-1);
+            }
+        }
+        if (blk->result_expr) {
+            auto res = compile_node(*blk->result_expr);
+            if (!res) return res;
+        } else {
+            bool loaded = false;
+            if (!blk->statements.empty()) {
+                if (const auto* decl = dynamic_cast<const VarDeclNode*>(blk->statements.back().get())) {
+                    auto idx = get_variable_index(decl->name, decl->location);
+                    if (idx) {
+                        emit(Opcode::LOAD_VAR, idx.value());
+                        adjust_stack(1);
+                        loaded = true;
+                    }
+                } else if (const auto* assign = dynamic_cast<const AssignmentNode*>(blk->statements.back().get())) {
+                    auto idx = get_variable_index(assign->name, assign->location);
+                    if (idx) {
+                        emit(Opcode::LOAD_VAR, idx.value());
+                        adjust_stack(1);
+                        loaded = true;
+                    }
+                }
+            }
+            if (!loaded) {
+                uint16_t zero_idx = add_constant(0.0);
+                emit(Opcode::CONSTANT, zero_idx);
+                adjust_stack(1);
+            }
+        }
         return {};
     }
 
@@ -218,6 +294,27 @@ Result<void> BytecodeCompiler::compile_node(const ASTNode& node) {
         else if (name == "smoothstep") emit(Opcode::SMOOTHSTEP);
         else if (name == "lerp" || name == "mix") emit(Opcode::LERP);
         else if (name == "pow") emit(Opcode::POW);
+        // Calculus
+        else if (name == "diff_step") emit(Opcode::DIFF_STEP);
+        else if (name == "gradient2d") emit(Opcode::GRADIENT2D);
+        else if (name == "curvature") emit(Opcode::CURVATURE);
+        else if (name == "trapz") emit(Opcode::TRAPZ);
+        else if (name == "simpson") emit(Opcode::SIMPSON);
+        else if (name == "euler") emit(Opcode::EULER);
+        else if (name == "rk4") emit(Opcode::RK4);
+        else if (name == "laplacian2d") emit(Opcode::LAPLACIAN2D);
+        // Spectral & Windowing (FFT) Functions
+        else if (name == "hann") emit(Opcode::HANN);
+        else if (name == "hamming") emit(Opcode::HAMMING);
+        else if (name == "blackman") emit(Opcode::BLACKMAN);
+        else if (name == "bartlett") emit(Opcode::BARTLETT);
+        else if (name == "flattop") emit(Opcode::FLATTOP);
+        else if (name == "square_wave") emit(Opcode::SQUARE_WAVE);
+        else if (name == "sawtooth_wave") emit(Opcode::SAWTOOTH_WAVE);
+        else if (name == "triangle_wave") emit(Opcode::TRIANGLE_WAVE);
+        else if (name == "dirichlet") emit(Opcode::DIRICHLET);
+        else if (name == "gaussian") emit(Opcode::GAUSSIAN);
+        else if (name == "chirp") emit(Opcode::CHIRP);
         else {
             return Diagnostic{
                 ErrorCode::UnknownIdentifier,

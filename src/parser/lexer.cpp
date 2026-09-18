@@ -68,15 +68,13 @@ Result<std::vector<Token>> Lexer::tokenize() {
             case ')': tokens.push_back({TokenType::RParen, ")", 0.0, loc}); break;
             case ',': tokens.push_back({TokenType::Comma, ",", 0.0, loc}); break;
 
+            case ';': tokens.push_back({TokenType::Semicolon, ";", 0.0, loc}); break;
+
             case '=':
                 if (match('=')) {
                     tokens.push_back({TokenType::EqualEqual, "==", 0.0, loc});
                 } else {
-                    return Diagnostic{
-                        ErrorCode::UnexpectedCharacter,
-                        "Single '=' is not allowed. Did you mean '==' for equality test?",
-                        loc
-                    };
+                    tokens.push_back({TokenType::Equal, "=", 0.0, loc});
                 }
                 break;
 
@@ -213,6 +211,12 @@ Result<Token> Lexer::scan_identifier() {
     }
 
     std::string_view text = source_.substr(start_, current_ - start_);
+    if (text == "let") {
+        return Token{TokenType::KeywordLet, text, 0.0, loc};
+    }
+    if (text == "var") {
+        return Token{TokenType::KeywordVar, text, 0.0, loc};
+    }
     return Token{TokenType::Identifier, text, 0.0, loc};
 }
 

@@ -87,4 +87,37 @@ public:
     }
 };
 
+class VarDeclNode final : public ASTNode {
+public:
+    std::string name;
+    std::unique_ptr<ASTNode> initializer;
+
+    VarDeclNode(std::string var_name, std::unique_ptr<ASTNode> init_expr, SourceLocation loc = {})
+        : name(std::move(var_name)), initializer(std::move(init_expr)) {
+        location = loc;
+    }
+};
+
+class AssignmentNode final : public ASTNode {
+public:
+    std::string name;
+    std::unique_ptr<ASTNode> value;
+
+    AssignmentNode(std::string var_name, std::unique_ptr<ASTNode> val_expr, SourceLocation loc = {})
+        : name(std::move(var_name)), value(std::move(val_expr)) {
+        location = loc;
+    }
+};
+
+class BlockNode final : public ASTNode {
+public:
+    std::vector<std::unique_ptr<ASTNode>> statements;
+    std::unique_ptr<ASTNode> result_expr;
+
+    BlockNode(std::vector<std::unique_ptr<ASTNode>> stmts, std::unique_ptr<ASTNode> result, SourceLocation loc = {})
+        : statements(std::move(stmts)), result_expr(std::move(result)) {
+        location = loc;
+    }
+};
+
 } // namespace formulaic

@@ -25,6 +25,7 @@ private:
     bool check(TokenType type) const noexcept;
     bool match(TokenType type) noexcept;
 
+    Result<std::unique_ptr<ASTNode>> parse_statement();
     Result<std::unique_ptr<ASTNode>> parse_expression();
     Result<std::unique_ptr<ASTNode>> parse_logical_or();
     Result<std::unique_ptr<ASTNode>> parse_logical_and();

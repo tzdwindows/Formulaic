@@ -12,6 +12,8 @@ enum class Opcode : uint8_t {
     NOP = 0,
     CONSTANT,       // operand = constant index
     LOAD_VAR,       // operand = variable index
+    STORE_VAR,      // operand = variable index
+    POP,            // pop top of stack
 
     // Arithmetic
     ADD,
@@ -105,6 +107,29 @@ enum class Opcode : uint8_t {
     SMOOTHSTEP,     // 3 args: edge0, edge1, x
     LERP,           // 3 args: a, b, t
 
+    // Calculus Functions
+    DIFF_STEP,      // 3 args: f_plus, f_minus, h
+    GRADIENT2D,     // 2 args: dx, dy
+    CURVATURE,      // 2 args: yp, ypp
+    TRAPZ,          // 3 args: y0, y1, dx
+    SIMPSON,        // 4 args: y0, y1, y2, h
+    EULER,          // 3 args: y, dydt, dt
+    RK4,            // 6 args: y, k1, k2, k3, k4, dt
+    LAPLACIAN2D,    // 2 args: f_xx, f_yy
+
+    // Spectral & Windowing (FFT) Functions
+    HANN,           // 1 arg
+    HAMMING,        // 1 arg
+    BLACKMAN,       // 1 arg
+    BARTLETT,       // 1 arg
+    FLATTOP,        // 1 arg
+    SQUARE_WAVE,    // 1 arg
+    SAWTOOTH_WAVE,  // 1 arg
+    TRIANGLE_WAVE,  // 1 arg
+    DIRICHLET,      // 2 args: n, x
+    GAUSSIAN,       // 3 args: x, mu, sigma
+    CHIRP,          // 4 args: t, f0, t1, f1
+
     RET
 };
 
@@ -129,6 +154,8 @@ struct FORMULAIC_API BytecodeProgram {
         case Opcode::NOP: return "NOP";
         case Opcode::CONSTANT: return "CONSTANT";
         case Opcode::LOAD_VAR: return "LOAD_VAR";
+        case Opcode::STORE_VAR: return "STORE_VAR";
+        case Opcode::POP: return "POP";
         case Opcode::ADD: return "ADD";
         case Opcode::SUB: return "SUB";
         case Opcode::MUL: return "MUL";
@@ -203,6 +230,25 @@ struct FORMULAIC_API BytecodeProgram {
         case Opcode::CLAMP: return "CLAMP";
         case Opcode::SMOOTHSTEP: return "SMOOTHSTEP";
         case Opcode::LERP: return "LERP";
+        case Opcode::DIFF_STEP: return "DIFF_STEP";
+        case Opcode::GRADIENT2D: return "GRADIENT2D";
+        case Opcode::CURVATURE: return "CURVATURE";
+        case Opcode::TRAPZ: return "TRAPZ";
+        case Opcode::SIMPSON: return "SIMPSON";
+        case Opcode::EULER: return "EULER";
+        case Opcode::RK4: return "RK4";
+        case Opcode::LAPLACIAN2D: return "LAPLACIAN2D";
+        case Opcode::HANN: return "HANN";
+        case Opcode::HAMMING: return "HAMMING";
+        case Opcode::BLACKMAN: return "BLACKMAN";
+        case Opcode::BARTLETT: return "BARTLETT";
+        case Opcode::FLATTOP: return "FLATTOP";
+        case Opcode::SQUARE_WAVE: return "SQUARE_WAVE";
+        case Opcode::SAWTOOTH_WAVE: return "SAWTOOTH_WAVE";
+        case Opcode::TRIANGLE_WAVE: return "TRIANGLE_WAVE";
+        case Opcode::DIRICHLET: return "DIRICHLET";
+        case Opcode::GAUSSIAN: return "GAUSSIAN";
+        case Opcode::CHIRP: return "CHIRP";
         case Opcode::RET: return "RET";
         default: return "UNKNOWN";
     }

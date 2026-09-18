@@ -18,6 +18,7 @@ public:
 private:
     Result<void> compile_node(const ASTNode& node);
     uint16_t add_constant(double value);
+    uint16_t declare_variable(std::string_view name);
     Result<uint16_t> get_variable_index(std::string_view name, const SourceLocation& loc);
 
     void emit(Opcode op, uint16_t operand = 0);

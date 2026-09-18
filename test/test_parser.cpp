@@ -283,6 +283,92 @@ int main() {
         std::cout << "PASSED (all 34+ extended math functions verified)\n";
     }
 
+    // -------------------------------------------------------------------------
+    // Test 10: Variable Declarations (let, var) & Calculus/FFT Functions
+    // -------------------------------------------------------------------------
+    {
+        std::cout << "[Test 10] Variable Declarations & Calculus / FFT Builtins... ";
+
+        // 1. Variable Declarations
+        auto r_let = formulaic::Expression::parse("let a = 10; let b = 20; a + b;");
+        TEST_ASSERT(r_let.has_value(), r_let.error().format());
+        TEST_ASSERT_NEAR(r_let->eval(0.0), 30.0, 1e-9, "let a = 10; let b = 20; a + b == 30");
+
+        auto r_var = formulaic::Expression::parse("var u = x * 2; var v = y * 3; hypot(u, v)");
+        TEST_ASSERT(r_var.has_value(), r_var.error().format());
+        TEST_ASSERT_NEAR(r_var->eval(3.0, 4.0), hypot(6.0, 12.0), 1e-9, "hypot(2x, 3y)");
+
+        auto r_multi = formulaic::Expression::parse(
+            "let r = hypot(x, y);\n"
+            "let theta = atan2(y, x);\n"
+            "r * sin(theta);"
+        );
+        TEST_ASSERT(r_multi.has_value(), r_multi.error().format());
+        TEST_ASSERT_NEAR(r_multi->eval(3.0, 4.0), 4.0, 1e-9, "r * sin(theta) == y");
+
+        // 2. Calculus functions
+        // diff_step(fp, fm, h) = (fp - fm) / (2h)
+        auto r_diff = formulaic::Expression::parse("diff_step(sin(0.1), sin(-0.1), 0.1)");
+        TEST_ASSERT(r_diff.has_value(), r_diff.error().format());
+        TEST_ASSERT_NEAR(r_diff->eval(0.0), sin(0.1) / 0.1, 1e-9, "diff_step central difference");
+
+        // curvature(y', y'') = |y''| / (1 + y'^2)^1.5. For circle r=2 at top: y'=0, y''=0.5 -> curvature = 0.5
+        auto r_curv = formulaic::Expression::parse("curvature(0.0, 0.5)");
+        TEST_ASSERT(r_curv.has_value(), r_curv.error().format());
+        TEST_ASSERT_NEAR(r_curv->eval(0.0), 0.5, 1e-9, "curvature == 0.5");
+
+        // trapz(y0, y1, dx) = 0.5 * (y0 + y1) * dx
+        auto r_trapz = formulaic::Expression::parse("trapz(2, 4, 3)");
+        TEST_ASSERT(r_trapz.has_value(), r_trapz.error().format());
+        TEST_ASSERT_NEAR(r_trapz->eval(0.0), 9.0, 1e-9, "trapz(2, 4, 3) == 9");
+
+        // simpson(y0, y1, y2, h) = (y0 + 4*y1 + y2) * (h / 3.0)
+        auto r_simp = formulaic::Expression::parse("simpson(1, 4, 1, 1)");
+        TEST_ASSERT(r_simp.has_value(), r_simp.error().format());
+        TEST_ASSERT_NEAR(r_simp->eval(0.0), 6.0, 1e-9, "simpson(1, 4, 1, 1) == 6");
+
+        // euler(y, dydt, dt) = y + dydt * dt
+        auto r_euler = formulaic::Expression::parse("euler(10, -2, 0.5)");
+        TEST_ASSERT(r_euler.has_value(), r_euler.error().format());
+        TEST_ASSERT_NEAR(r_euler->eval(0.0), 9.0, 1e-9, "euler(10, -2, 0.5) == 9");
+
+        // laplacian2d(dxx, dyy) = dxx + dyy
+        auto r_lap = formulaic::Expression::parse("laplacian2d(3, 4)");
+        TEST_ASSERT(r_lap.has_value(), r_lap.error().format());
+        TEST_ASSERT_NEAR(r_lap->eval(0.0), 7.0, 1e-9, "laplacian2d(3, 4) == 7");
+
+        // 3. Spectral & Windowing functions
+        // Hann window: hann(0) = 0, hann(0.5) = 1, hann(1) = 0
+        auto r_hann = formulaic::Expression::parse("hann(0.5)");
+        TEST_ASSERT(r_hann.has_value(), r_hann.error().format());
+        TEST_ASSERT_NEAR(r_hann->eval(0.0), 1.0, 1e-9, "hann(0.5) == 1.0");
+
+        // Hamming window: hamming(0.5) = 0.54 - 0.46*cos(pi) = 1.0
+        auto r_hamm = formulaic::Expression::parse("hamming(0.5)");
+        TEST_ASSERT(r_hamm.has_value(), r_hamm.error().format());
+        TEST_ASSERT_NEAR(r_hamm->eval(0.0), 1.0, 1e-9, "hamming(0.5) == 1.0");
+
+        // Waveforms
+        auto r_sq = formulaic::Expression::parse("square_wave(0.2) + square_wave(0.7)");
+        TEST_ASSERT(r_sq.has_value(), r_sq.error().format());
+        TEST_ASSERT_NEAR(r_sq->eval(0.0), 0.0, 1e-9, "square_wave(0.2) + square_wave(0.7) == 0");
+
+        auto r_saw = formulaic::Expression::parse("sawtooth_wave(0.5)");
+        TEST_ASSERT(r_saw.has_value(), r_saw.error().format());
+        TEST_ASSERT_NEAR(r_saw->eval(0.0), 0.0, 1e-9, "sawtooth_wave(0.5) == 0");
+
+        auto r_tri = formulaic::Expression::parse("triangle_wave(0.25)");
+        TEST_ASSERT(r_tri.has_value(), r_tri.error().format());
+        TEST_ASSERT_NEAR(r_tri->eval(0.0), 0.0, 1e-9, "triangle_wave(0.25) == 0");
+
+        // Gaussian
+        auto r_gauss = formulaic::Expression::parse("gaussian(0, 0, 1)");
+        TEST_ASSERT(r_gauss.has_value(), r_gauss.error().format());
+        TEST_ASSERT_NEAR(r_gauss->eval(0.0), 1.0, 1e-9, "gaussian(0, 0, 1) == 1");
+
+        std::cout << "PASSED\n";
+    }
+
     std::cout << "\n>>> All Parser & Evaluation Engine Tests PASSED successfully! <<<\n";
     return 0;
 }

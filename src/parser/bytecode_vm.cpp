@@ -18,6 +18,12 @@ double BytecodeVM::evaluate(
     const double* const constants = program.constants.data();
     const double* const vars = variables.data();
     const size_t var_count = variables.size();
+    constexpr size_t kMaxVars = 64;
+    double local_vars[kMaxVars] = {0.0};
+    const size_t initial_count = std::min(var_count, kMaxVars);
+    for (size_t i = 0; i < initial_count; ++i) {
+        local_vars[i] = vars[i];
+    }
 
     for (size_t ip = 0; ip < inst_count; ++ip) {
         const Instruction& inst = instructions[ip];
@@ -34,11 +40,23 @@ double BytecodeVM::evaluate(
 
             case Opcode::LOAD_VAR:
                 if (sp < kMaxStack) {
-                    if (inst.operand < var_count) {
-                        stack[sp++] = vars[inst.operand];
+                    if (inst.operand < kMaxVars) {
+                        stack[sp++] = local_vars[inst.operand];
                     } else {
                         stack[sp++] = 0.0;
                     }
+                }
+                break;
+
+            case Opcode::STORE_VAR:
+                if (sp > 0 && inst.operand < kMaxVars) {
+                    local_vars[inst.operand] = stack[--sp];
+                }
+                break;
+
+            case Opcode::POP:
+                if (sp > 0) {
+                    --sp;
                 }
                 break;
 
@@ -392,6 +410,197 @@ double BytecodeVM::evaluate(
                     const double t = stack[sp - 1];
                     stack[sp - 3] = a + t * (b - a);
                     sp -= 2;
+                }
+                break;
+
+            // Calculus
+            case Opcode::DIFF_STEP:
+                if (sp >= 3) {
+                    const double fp = stack[sp - 3];
+                    const double fm = stack[sp - 2];
+                    const double h  = stack[sp - 1];
+                    stack[sp - 3] = (h != 0.0) ? (fp - fm) / (2.0 * h) : 0.0;
+                    sp -= 2;
+                }
+                break;
+
+            case Opcode::GRADIENT2D:
+                if (sp >= 2) {
+                    stack[sp - 2] = std::hypot(stack[sp - 2], stack[sp - 1]);
+                    --sp;
+                }
+                break;
+
+            case Opcode::CURVATURE:
+                if (sp >= 2) {
+                    const double yp = stack[sp - 2];
+                    const double ypp = stack[sp - 1];
+                    const double denom = std::pow(1.0 + yp * yp, 1.5);
+                    stack[sp - 2] = (denom != 0.0) ? (std::abs(ypp) / denom) : 0.0;
+                    --sp;
+                }
+                break;
+
+            case Opcode::TRAPZ:
+                if (sp >= 3) {
+                    const double y0 = stack[sp - 3];
+                    const double y1 = stack[sp - 2];
+                    const double dx = stack[sp - 1];
+                    stack[sp - 3] = 0.5 * (y0 + y1) * dx;
+                    sp -= 2;
+                }
+                break;
+
+            case Opcode::SIMPSON:
+                if (sp >= 4) {
+                    const double y0 = stack[sp - 4];
+                    const double y1 = stack[sp - 3];
+                    const double y2 = stack[sp - 2];
+                    const double h  = stack[sp - 1];
+                    stack[sp - 4] = (y0 + 4.0 * y1 + y2) * (h / 3.0);
+                    sp -= 3;
+                }
+                break;
+
+            case Opcode::EULER:
+                if (sp >= 3) {
+                    const double y    = stack[sp - 3];
+                    const double dydt = stack[sp - 2];
+                    const double dt   = stack[sp - 1];
+                    stack[sp - 3] = y + dydt * dt;
+                    sp -= 2;
+                }
+                break;
+
+            case Opcode::RK4:
+                if (sp >= 6) {
+                    const double y  = stack[sp - 6];
+                    const double k1 = stack[sp - 5];
+                    const double k2 = stack[sp - 4];
+                    const double k3 = stack[sp - 3];
+                    const double k4 = stack[sp - 2];
+                    const double dt = stack[sp - 1];
+                    stack[sp - 6] = y + (k1 + 2.0 * k2 + 2.0 * k3 + k4) * (dt / 6.0);
+                    sp -= 5;
+                }
+                break;
+
+            case Opcode::LAPLACIAN2D:
+                if (sp >= 2) {
+                    stack[sp - 2] = stack[sp - 2] + stack[sp - 1];
+                    --sp;
+                }
+                break;
+
+            // Spectral & Windowing (FFT) Functions
+            case Opcode::HANN:
+                if (sp >= 1) {
+                    const double x = stack[sp - 1];
+                    stack[sp - 1] = (x < 0.0 || x > 1.0) ? 0.0 : 0.5 * (1.0 - std::cos(6.28318530717958647692 * x));
+                }
+                break;
+
+            case Opcode::HAMMING:
+                if (sp >= 1) {
+                    const double x = stack[sp - 1];
+                    stack[sp - 1] = (x < 0.0 || x > 1.0) ? 0.0 : (0.54 - 0.46 * std::cos(6.28318530717958647692 * x));
+                }
+                break;
+
+            case Opcode::BLACKMAN:
+                if (sp >= 1) {
+                    const double x = stack[sp - 1];
+                    constexpr double two_pi = 6.28318530717958647692;
+                    stack[sp - 1] = (x < 0.0 || x > 1.0) ? 0.0 : (0.42 - 0.5 * std::cos(two_pi * x) + 0.08 * std::cos(2.0 * two_pi * x));
+                }
+                break;
+
+            case Opcode::BARTLETT:
+                if (sp >= 1) {
+                    const double x = stack[sp - 1];
+                    stack[sp - 1] = (x < 0.0 || x > 1.0) ? 0.0 : (1.0 - std::abs(2.0 * x - 1.0));
+                }
+                break;
+
+            case Opcode::FLATTOP:
+                if (sp >= 1) {
+                    const double x = stack[sp - 1];
+                    if (x < 0.0 || x > 1.0) {
+                        stack[sp - 1] = 0.0;
+                    } else {
+                        constexpr double two_pi = 6.28318530717958647692;
+                        stack[sp - 1] = 0.21557895 - 0.41663158 * std::cos(two_pi * x)
+                                      + 0.277263158 * std::cos(2.0 * two_pi * x)
+                                      - 0.083578947 * std::cos(3.0 * two_pi * x)
+                                      + 0.006947368 * std::cos(4.0 * two_pi * x);
+                    }
+                }
+                break;
+
+            case Opcode::SQUARE_WAVE:
+                if (sp >= 1) {
+                    const double x = stack[sp - 1];
+                    const double frac = x - std::floor(x);
+                    stack[sp - 1] = (frac < 0.5) ? 1.0 : -1.0;
+                }
+                break;
+
+            case Opcode::SAWTOOTH_WAVE:
+                if (sp >= 1) {
+                    const double x = stack[sp - 1];
+                    const double frac = x - std::floor(x);
+                    stack[sp - 1] = 2.0 * frac - 1.0;
+                }
+                break;
+
+            case Opcode::TRIANGLE_WAVE:
+                if (sp >= 1) {
+                    const double x = stack[sp - 1];
+                    const double frac = x - std::floor(x);
+                    stack[sp - 1] = 2.0 * std::abs(2.0 * frac - 1.0) - 1.0;
+                }
+                break;
+
+            case Opcode::DIRICHLET:
+                if (sp >= 2) {
+                    const double n = stack[sp - 2];
+                    const double x = stack[sp - 1];
+                    const double denom = n * std::sin(x * 0.5);
+                    if (std::abs(denom) < 1e-12) {
+                        stack[sp - 2] = 1.0;
+                    } else {
+                        stack[sp - 2] = std::sin(n * x * 0.5) / denom;
+                    }
+                    --sp;
+                }
+                break;
+
+            case Opcode::GAUSSIAN:
+                if (sp >= 3) {
+                    const double x     = stack[sp - 3];
+                    const double mu    = stack[sp - 2];
+                    const double sigma = stack[sp - 1];
+                    if (sigma == 0.0) {
+                        stack[sp - 3] = (x == mu) ? 1.0 : 0.0;
+                    } else {
+                        const double z = (x - mu) / sigma;
+                        stack[sp - 3] = std::exp(-0.5 * z * z);
+                    }
+                    sp -= 2;
+                }
+                break;
+
+            case Opcode::CHIRP:
+                if (sp >= 4) {
+                    const double t  = stack[sp - 4];
+                    const double f0 = stack[sp - 3];
+                    const double t1 = stack[sp - 2];
+                    const double f1 = stack[sp - 1];
+                    constexpr double two_pi = 6.28318530717958647692;
+                    const double c = (t1 != 0.0) ? (f1 - f0) / t1 : 0.0;
+                    const double phase = two_pi * (f0 * t + 0.5 * c * t * t);
+                    stack[sp - 4] = std::sin(phase);
+                    sp -= 3;
                 }
                 break;
 

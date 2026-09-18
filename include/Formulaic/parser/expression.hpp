@@ -47,6 +47,11 @@ public:
         double* out_buffer
     ) const noexcept;
 
+    // Advanced Calculus & Spectral Analysis Extensions
+    [[nodiscard]] double differentiate(double x, double h = 1e-5) const noexcept;
+    [[nodiscard]] double integrate(double a, double b, size_t steps = 1000) const noexcept;
+    [[nodiscard]] std::vector<double> compute_spectrum(double t_start, double t_end, size_t sample_count) const;
+
     [[nodiscard]] const std::string& source() const noexcept { return source_; }
     [[nodiscard]] const std::vector<std::string>& variables() const noexcept { return program_.variable_names; }
     [[nodiscard]] const BytecodeProgram& bytecode() const noexcept { return program_; }

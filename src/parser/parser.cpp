@@ -69,7 +69,17 @@ const std::unordered_map<std::string_view, size_t> kKnownFunctions = {
     {"step", 2}, {"beta", 2},
 
     // 3-Argument Functions
-    {"clamp", 3}, {"smoothstep", 3}, {"lerp", 3}, {"mix", 3}
+    {"clamp", 3}, {"smoothstep", 3}, {"lerp", 3}, {"mix", 3},
+
+    // Calculus Functions
+    {"diff_step", 3}, {"gradient2d", 2}, {"curvature", 2},
+    {"trapz", 3}, {"simpson", 4}, {"euler", 3}, {"rk4", 6},
+    {"laplacian2d", 2},
+
+    // Spectral & Windowing (FFT) Functions
+    {"hann", 1}, {"hamming", 1}, {"blackman", 1}, {"bartlett", 1},
+    {"flattop", 1}, {"square_wave", 1}, {"sawtooth_wave", 1},
+    {"triangle_wave", 1}, {"dirichlet", 2}, {"gaussian", 3}, {"chirp", 4}
 };
 
 } // anonymous namespace
@@ -111,8 +121,54 @@ bool Parser::match(TokenType type) noexcept {
     return false;
 }
 
+Result<std::unique_ptr<ASTNode>> Parser::parse_statement() {
+    // 1. let <id> = <expr> [;]
+    // 2. var <id> = <expr> [;]
+    if (check(TokenType::KeywordLet) || check(TokenType::KeywordVar)) {
+        Token kw = advance();
+        if (!check(TokenType::Identifier)) {
+            return Diagnostic{
+                ErrorCode::UnexpectedToken,
+                "Expected identifier after variable declaration keyword '" + std::string(kw.text) + "'",
+                peek().location
+            };
+        }
+        Token id_tok = advance();
+        std::string var_name(id_tok.text);
+
+        if (!match(TokenType::Equal)) {
+            return Diagnostic{
+                ErrorCode::UnexpectedToken,
+                "Expected '=' after variable name '" + var_name + "'",
+                peek().location
+            };
+        }
+
+        auto init_res = parse_expression();
+        if (!init_res) return init_res;
+
+        match(TokenType::Semicolon);
+        while (match(TokenType::Semicolon)) {}
+
+        known_variables_.insert(var_name);
+        return std::make_unique<VarDeclNode>(std::move(var_name), std::move(init_res.value()), kw.location);
+    }
+
+    // 2. Expression statement or trailing expression
+    auto expr_res = parse_expression();
+    if (!expr_res) return expr_res;
+
+    if (match(TokenType::Semicolon)) {
+        while (match(TokenType::Semicolon)) {}
+    }
+
+    return expr_res;
+}
+
 Result<std::unique_ptr<ASTNode>> Parser::parse() {
-    if (tokens_.empty() || tokens_[0].type == TokenType::EndOfFile) {
+    while (match(TokenType::Semicolon)) {}
+
+    if (tokens_.empty() || is_at_end()) {
         return Diagnostic{
             ErrorCode::UnexpectedToken,
             "Empty expression",
@@ -120,19 +176,41 @@ Result<std::unique_ptr<ASTNode>> Parser::parse() {
         };
     }
 
-    auto expr = parse_expression();
-    if (!expr) return expr;
+    std::vector<std::unique_ptr<ASTNode>> statements;
+    SourceLocation first_loc = peek().location;
 
-    if (!is_at_end()) {
-        const auto& tok = peek();
+    while (!is_at_end()) {
+        auto stmt_res = parse_statement();
+        if (!stmt_res) return stmt_res;
+
+        statements.push_back(std::move(stmt_res.value()));
+        while (match(TokenType::Semicolon)) {}
+    }
+
+    if (statements.empty()) {
         return Diagnostic{
             ErrorCode::UnexpectedToken,
-            "Unexpected trailing token '" + std::string(tok.text) + "' after valid expression",
-            tok.location
+            "Empty expression",
+            first_loc
         };
     }
 
-    return expr;
+    if (statements.size() == 1) {
+        if (dynamic_cast<VarDeclNode*>(statements[0].get()) ||
+            dynamic_cast<AssignmentNode*>(statements[0].get())) {
+            return std::make_unique<BlockNode>(std::move(statements), nullptr, first_loc);
+        }
+        return std::move(statements[0]);
+    }
+
+    std::unique_ptr<ASTNode> result_expr = nullptr;
+    if (!dynamic_cast<VarDeclNode*>(statements.back().get()) &&
+        !dynamic_cast<AssignmentNode*>(statements.back().get())) {
+        result_expr = std::move(statements.back());
+        statements.pop_back();
+    }
+
+    return std::make_unique<BlockNode>(std::move(statements), std::move(result_expr), first_loc);
 }
 
 Result<std::unique_ptr<ASTNode>> Parser::parse_expression() {
