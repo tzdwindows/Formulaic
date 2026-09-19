@@ -51,7 +51,8 @@ constexpr int IDC_STATUS_TEXT = 1007;
 constexpr int IDC_COMBO_MODE  = 1008;
 constexpr int IDC_AC_LIST     = 1009;
 
-constexpr UINT_PTR TIMER_ANIM_ID = 2001;
+constexpr UINT_PTR TIMER_ANIM_ID     = 2001;
+constexpr UINT_PTR TIMER_DEBOUNCE_ID = 2002;
 
 enum class PlotMode {
     Auto = 0,
@@ -253,21 +254,23 @@ static LRESULT CALLBACK CanvasWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM
                 if (state->is_dragging) {
                     int dx = mx - state->last_mouse_x;
                     int dy = my - state->last_mouse_y;
-                    state->last_mouse_x = mx;
-                    state->last_mouse_y = my;
-                    state->renderer->viewport().pan(dx, dy);
-                }
+                    if (dx != 0 || dy != 0) {
+                        state->last_mouse_x = mx;
+                        state->last_mouse_y = my;
+                        state->renderer->viewport().pan(dx, dy);
 
-                formulaic::MouseEvent me{};
-                me.type = formulaic::MouseEventType::Move;
-                me.button = state->is_dragging ? formulaic::MouseButton::Left : formulaic::MouseButton::None;
-                me.screen_pos = {mx, my};
-                me.world_pos = state->renderer->viewport().screen_to_world(mx, my);
-                state->renderer->dispatch_mouse_event(me);
+                        formulaic::MouseEvent me{};
+                        me.type = formulaic::MouseEventType::Move;
+                        me.button = formulaic::MouseButton::Left;
+                        me.screen_pos = {mx, my};
+                        me.world_pos = state->renderer->viewport().screen_to_world(mx, my);
+                        state->renderer->dispatch_mouse_event(me);
 
-                if (!state->uses_time_t) {
-                    state->renderer->render(state->get_elapsed_time());
-                    state->renderer->present();
+                        if (!state->uses_time_t) {
+                            state->renderer->render(state->get_elapsed_time());
+                            state->renderer->present();
+                        }
+                    }
                 }
             }
             return 0;
@@ -428,26 +431,51 @@ static COLORREF get_token_color(EditorTokenType type) noexcept {
     }
 }
 
+static std::string get_edit_text_exact(HWND hwnd_edit) {
+    if (!hwnd_edit) return {};
+    GETTEXTLENGTHEX gtl{};
+    gtl.flags = GTL_DEFAULT | GTL_NUMCHARS;
+    gtl.codepage = CP_ACP;
+    int len = static_cast<int>(SendMessageA(hwnd_edit, EM_GETTEXTLENGTHEX, reinterpret_cast<WPARAM>(&gtl), 0));
+    if (len > 0) {
+        std::string text(len + 2, '\0');
+        GETTEXTEX gt{};
+        gt.cb = len + 1;
+        gt.flags = GT_DEFAULT;
+        gt.codepage = CP_ACP;
+        int fetched = static_cast<int>(SendMessageA(hwnd_edit, EM_GETTEXTEX, reinterpret_cast<WPARAM>(&gt), reinterpret_cast<LPARAM>(text.data())));
+        if (fetched > 0) {
+            text.resize(fetched);
+            return text;
+        }
+    }
+    int gwt_len = GetWindowTextLengthA(hwnd_edit);
+    if (gwt_len <= 0) return {};
+    std::string text(gwt_len + 1, '\0');
+    GetWindowTextA(hwnd_edit, text.data(), gwt_len + 1);
+    text.resize(gwt_len);
+    return text;
+}
+
 static void apply_syntax_highlighting(EditorWindowState* state) {
     if (!state || !state->hwnd_edit || state->is_highlighting) return;
     state->is_highlighting = true;
 
-    int len = GetWindowTextLengthA(state->hwnd_edit);
+    std::string text = get_edit_text_exact(state->hwnd_edit);
+    int len = static_cast<int>(text.size());
     if (len <= 0) {
         state->is_highlighting = false;
         return;
     }
-
-    std::string text(len + 1, '\0');
-    GetWindowTextA(state->hwnd_edit, text.data(), len + 1);
-    text.resize(len);
 
     CHARRANGE saved_sel{};
     SendMessageA(state->hwnd_edit, EM_EXGETSEL, 0, reinterpret_cast<LPARAM>(&saved_sel));
     POINT scroll_pos{};
     SendMessageA(state->hwnd_edit, EM_GETSCROLLPOS, 0, reinterpret_cast<LPARAM>(&scroll_pos));
 
-    // Freeze repainting during format update
+    // Turn off event mask and freeze repainting during format update
+    DWORD old_mask = static_cast<DWORD>(SendMessageA(state->hwnd_edit, EM_GETEVENTMASK, 0, 0));
+    SendMessageA(state->hwnd_edit, EM_SETEVENTMASK, 0, 0);
     SendMessageA(state->hwnd_edit, WM_SETREDRAW, FALSE, 0);
 
     // Reset whole text to default color
@@ -474,12 +502,11 @@ static void apply_syntax_highlighting(EditorWindowState* state) {
         SendMessageA(state->hwnd_edit, EM_SETCHARFORMAT, SCF_SELECTION, reinterpret_cast<LPARAM>(&cf_tok));
     }
 
-    // Restore caret selection and scroll
+    // Restore caret selection, scroll, event mask, and redraw
     SendMessageA(state->hwnd_edit, EM_EXSETSEL, 0, reinterpret_cast<LPARAM>(&saved_sel));
     SendMessageA(state->hwnd_edit, EM_SETSCROLLPOS, 0, reinterpret_cast<LPARAM>(&scroll_pos));
-
-    // Unfreeze and redraw
     SendMessageA(state->hwnd_edit, WM_SETREDRAW, TRUE, 0);
+    SendMessageA(state->hwnd_edit, EM_SETEVENTMASK, 0, old_mask);
     InvalidateRect(state->hwnd_edit, nullptr, FALSE);
 
     state->is_highlighting = false;
@@ -551,15 +578,11 @@ static void trigger_autocomplete_check(EditorWindowState* state) {
         return;
     }
 
-    int len = GetWindowTextLengthA(state->hwnd_edit);
-    if (len <= 0) {
+    std::string text = get_edit_text_exact(state->hwnd_edit);
+    if (text.empty() || caret > static_cast<int>(text.size())) {
         hide_autocomplete(state);
         return;
     }
-
-    std::string text(len + 1, '\0');
-    GetWindowTextA(state->hwnd_edit, text.data(), len + 1);
-    text.resize(len);
 
     int word_start = caret;
     while (word_start > 0) {
@@ -698,9 +721,7 @@ static LRESULT CALLBACK AutocompleteWndProc(HWND hwnd, UINT msg, WPARAM wparam, 
 static void update_expression_from_edit(EditorWindowState* state) {
     if (!state || !state->hwnd_edit) return;
 
-    char buffer[4096] = {0};
-    GetWindowTextA(state->hwnd_edit, buffer, sizeof(buffer) - 1);
-    std::string text(buffer);
+    std::string text = get_edit_text_exact(state->hwnd_edit);
 
     while (!text.empty() && (text.back() == ' ' || text.back() == '\t' || text.back() == '\r' || text.back() == '\n')) {
         text.pop_back();
@@ -848,16 +869,18 @@ static LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
 
             if (id == IDC_EDIT_EXPR && code == EN_CHANGE) {
                 if (state && !state->is_highlighting) {
-                    update_expression_from_edit(state);
                     apply_syntax_highlighting(state);
+                    // 120ms debounce so typing is fluid without blocking on heavy render
+                    SetTimer(hwnd, TIMER_DEBOUNCE_ID, 120, nullptr);
                 }
                 return 0;
             }
 
             if (id == IDC_BTN_RENDER && code == BN_CLICKED) {
                 if (state) {
-                    update_expression_from_edit(state);
+                    KillTimer(hwnd, TIMER_DEBOUNCE_ID);
                     apply_syntax_highlighting(state);
+                    update_expression_from_edit(state);
                 }
                 return 0;
             }
@@ -876,6 +899,7 @@ static LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
 
             // Presets
             if (id == IDC_BTN_PRESET1 && code == BN_CLICKED) {
+                KillTimer(hwnd, TIMER_DEBOUNCE_ID);
                 const char* s = "let r = hypot(x, y);\nlet theta = atan2(y, x);\nsin(6.0 * theta) * exp(-0.35 * r);";
                 SetWindowTextA(state->hwnd_edit, s);
                 SendMessageA(state->hwnd_combo_mode, CB_SETCURSEL, static_cast<WPARAM>(PlotMode::Auto), 0);
@@ -886,6 +910,7 @@ static LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
             }
 
             if (id == IDC_BTN_PRESET2 && code == BN_CLICKED) {
+                KillTimer(hwnd, TIMER_DEBOUNCE_ID);
                 const char* s = "let h = 0.01;\nlet fp = sin(x + h) * cos(y);\nlet fm = sin(x - h) * cos(y);\ndiff_step(fp, fm, h);";
                 SetWindowTextA(state->hwnd_edit, s);
                 SendMessageA(state->hwnd_combo_mode, CB_SETCURSEL, static_cast<WPARAM>(PlotMode::Auto), 0);
@@ -896,6 +921,7 @@ static LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
             }
 
             if (id == IDC_BTN_PRESET3 && code == BN_CLICKED) {
+                KillTimer(hwnd, TIMER_DEBOUNCE_ID);
                 const char* s = "let u = clamp((x + 5.0) / 10.0, 0.0, 1.0);\nhann(u) * triangle_wave(u * 5.0 - t * 0.5);";
                 SetWindowTextA(state->hwnd_edit, s);
                 SendMessageA(state->hwnd_combo_mode, CB_SETCURSEL, static_cast<WPARAM>(PlotMode::Auto), 0);
@@ -906,6 +932,7 @@ static LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
             }
 
             if (id == IDC_BTN_PRESET4 && code == BN_CLICKED) {
+                KillTimer(hwnd, TIMER_DEBOUNCE_ID);
                 const char* s = "let r = hypot(x, y);\nr - 3.0 - 0.4 * sin(7.0 * atan2(y, x) + 2.0 * t) = 0";
                 SetWindowTextA(state->hwnd_edit, s);
                 SendMessageA(state->hwnd_combo_mode, CB_SETCURSEL, static_cast<WPARAM>(PlotMode::Implicit2D), 0);
@@ -942,6 +969,13 @@ static LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
         }
 
         case WM_TIMER: {
+            if (wparam == TIMER_DEBOUNCE_ID) {
+                KillTimer(hwnd, TIMER_DEBOUNCE_ID);
+                if (state) {
+                    update_expression_from_edit(state);
+                }
+                return 0;
+            }
             if (wparam == TIMER_ANIM_ID && state && state->renderer) {
                 if (state->uses_time_t && state->is_valid_expr) {
                     state->renderer->render(state->get_elapsed_time());
@@ -975,6 +1009,7 @@ static LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
         }
 
         case WM_DESTROY: {
+            KillTimer(hwnd, TIMER_DEBOUNCE_ID);
             KillTimer(hwnd, TIMER_ANIM_ID);
             PostQuitMessage(0);
             return 0;
@@ -1314,6 +1349,31 @@ int main(int argc, char* argv[]) {
         SendMessageA(hwnd_main, WM_COMMAND, MAKEWPARAM(IDC_BTN_PRESET4, BN_CLICKED), 0);
         TEST_ASSERT(state->is_valid_expr, "Preset 4 is valid");
         TEST_ASSERT(state->plot_mode == PlotMode::Implicit2D, "Plot mode set to Implicit2D");
+
+        // Verification 9: Test Navier-Stokes Taylor-Green vortex implicit multi-line script
+        const char* navier_script =
+            "let h = 0.01;\r\n"
+            "let nu = 0.08;\r\n"
+            "let u0 = sin(x) * cos(y);\r\n"
+            "let v0 = -cos(x) * sin(y);\r\n"
+            "let dudx = diff_step(sin(x + h) * cos(y), sin(x - h) * cos(y), h);\r\n"
+            "let dudy = diff_step(sin(x) * cos(y + h), sin(x) * cos(y - h), h);\r\n"
+            "let dpdx = diff_step(0.25 * (cos(2.0 * (x + h)) + cos(2.0 * y)), 0.25 * (cos(2.0 * (x - h)) + cos(2.0 * y)), h);\r\n"
+            "let d2u_dx2 = (sin(x + h) * cos(y) - 2.0 * u0 + sin(x - h) * cos(y)) / (h * h);\r\n"
+            "let d2u_dy2 = (sin(x) * cos(y + h) - 2.0 * u0 + sin(x) * cos(y - h)) / (h * h);\r\n"
+            "let lap_u = d2u_dx2 + d2u_dy2;\r\n"
+            "u0 * dudx + v0 * dudy + dpdx - nu * lap_u = 0";
+
+        SetWindowTextA(state->hwnd_edit, navier_script);
+        apply_syntax_highlighting(state.get());
+        update_expression_from_edit(state.get());
+
+        TEST_ASSERT(state->is_valid_expr, "Navier-Stokes equation parsed successfully");
+        TEST_ASSERT(state->plot_mode == PlotMode::Implicit2D, "Detected PlotMode::Implicit2D for equation");
+
+        // Trigger render
+        state->renderer->render(0.0);
+        state->renderer->present();
 
         std::cout << "All split-window interactive GUI, syntax highlighting & autocomplete assertions PASSED!\n";
     }

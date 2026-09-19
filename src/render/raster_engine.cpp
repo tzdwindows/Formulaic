@@ -1,7 +1,10 @@
 #include <Formulaic/render/raster_engine.hpp>
+#include <algorithm>
 #include <cmath>
 #include <iomanip>
 #include <sstream>
+#include <thread>
+#include <vector>
 
 namespace formulaic {
 
@@ -249,8 +252,8 @@ void RasterEngine::plot_implicit(
 ) const {
     if (!expr.is_valid()) return;
 
-    // Grid step in screen pixels (2px step for high FPS, ultra-crisp contours)
-    constexpr int kStep = 2;
+    // Grid step in screen pixels (3px step with bisection root solver for ultra-fast, smooth contours)
+    constexpr int kStep = 3;
     const int cols = (fb.width() + kStep - 1) / kStep + 1;
     const int rows = (fb.height() + kStep - 1) / kStep + 1;
 
@@ -280,15 +283,43 @@ void RasterEngine::plot_implicit(
         return v;
     };
 
-    // 1. Evaluate grid corners
-    for (int r = 0; r < rows; ++r) {
-        const double sy = r * kStep;
-        for (int c = 0; c < cols; ++c) {
-            const double sx = c * kStep;
-            Point2D wpt = vp.screen_to_world(sx, sy);
-            const size_t idx = static_cast<size_t>(r) * cols + c;
-            grid_world[idx] = wpt;
-            grid[idx] = eval_safe(wpt);
+    // 1. Evaluate grid corners (parallelized across CPU cores)
+    const unsigned int hw_threads = std::clamp(std::thread::hardware_concurrency(), 1u, 32u);
+    if (hw_threads > 1 && rows >= 16) {
+        std::vector<std::thread> workers;
+        workers.reserve(hw_threads);
+        const int chunk = (rows + hw_threads - 1) / hw_threads;
+        for (unsigned int t = 0; t < hw_threads; ++t) {
+            const int r_start = static_cast<int>(t * chunk);
+            const int r_end = std::min(rows, r_start + chunk);
+            if (r_start < r_end) {
+                workers.emplace_back([&, r_start, r_end]() {
+                    for (int r = r_start; r < r_end; ++r) {
+                        const double sy = r * kStep;
+                        for (int c = 0; c < cols; ++c) {
+                            const double sx = c * kStep;
+                            Point2D wpt = vp.screen_to_world(sx, sy);
+                            const size_t idx = static_cast<size_t>(r) * cols + c;
+                            grid_world[idx] = wpt;
+                            grid[idx] = eval_safe(wpt);
+                        }
+                    }
+                });
+            }
+        }
+        for (auto& w : workers) {
+            if (w.joinable()) w.join();
+        }
+    } else {
+        for (int r = 0; r < rows; ++r) {
+            const double sy = r * kStep;
+            for (int c = 0; c < cols; ++c) {
+                const double sx = c * kStep;
+                Point2D wpt = vp.screen_to_world(sx, sy);
+                const size_t idx = static_cast<size_t>(r) * cols + c;
+                grid_world[idx] = wpt;
+                grid[idx] = eval_safe(wpt);
+            }
         }
     }
 
@@ -423,19 +454,28 @@ void RasterEngine::plot_implicit(
             const double sx1 = (c + 1) * kStep;
 
             auto process_subcell = [&](double sub_sx0, double sub_sy0, double sub_sx1, double sub_sy1) {
-                const double sub_sx_mid = (sub_sx0 + sub_sx1) * 0.5;
-                const double sub_sy_mid = (sub_sy0 + sub_sy1) * 0.5;
-
                 Point2D w_tl = vp.screen_to_world(sub_sx0, sub_sy0);
                 Point2D w_tr = vp.screen_to_world(sub_sx1, sub_sy0);
                 Point2D w_br = vp.screen_to_world(sub_sx1, sub_sy1);
                 Point2D w_bl = vp.screen_to_world(sub_sx0, sub_sy1);
+
+                const double v_tl = eval_safe(w_tl);
+                const double v_tr = eval_safe(w_tr);
+                const double v_br = eval_safe(w_br);
+                const double v_bl = eval_safe(w_bl);
+
+                const bool sub_all_pos = (v_tl > 0.0) && (v_tr > 0.0) && (v_br > 0.0) && (v_bl > 0.0);
+                const bool sub_all_neg = (v_tl <= 0.0) && (v_tr <= 0.0) && (v_br <= 0.0) && (v_bl <= 0.0);
+                if (sub_all_pos || sub_all_neg) return;
+
+                const double sub_sx_mid = (sub_sx0 + sub_sx1) * 0.5;
+                const double sub_sy_mid = (sub_sy0 + sub_sy1) * 0.5;
                 Point2D w_c  = vp.screen_to_world(sub_sx_mid, sub_sy_mid);
 
-                VertexInfo vTL{{sub_sx0, sub_sy0}, w_tl, eval_safe(w_tl)};
-                VertexInfo vTR{{sub_sx1, sub_sy0}, w_tr, eval_safe(w_tr)};
-                VertexInfo vBR{{sub_sx1, sub_sy1}, w_br, eval_safe(w_br)};
-                VertexInfo vBL{{sub_sx0, sub_sy1}, w_bl, eval_safe(w_bl)};
+                VertexInfo vTL{{sub_sx0, sub_sy0}, w_tl, v_tl};
+                VertexInfo vTR{{sub_sx1, sub_sy0}, w_tr, v_tr};
+                VertexInfo vBR{{sub_sx1, sub_sy1}, w_br, v_br};
+                VertexInfo vBL{{sub_sx0, sub_sy1}, w_bl, v_bl};
                 VertexInfo vC {{sub_sx_mid, sub_sy_mid}, w_c, eval_safe(w_c)};
 
                 auto local_draw = [&](const VertexInfo& va, const VertexInfo& vb, const VertexInfo& vc) {
@@ -490,10 +530,20 @@ void RasterEngine::plot_implicit(
                 const size_t idx_br = static_cast<size_t>(r + 1) * cols + (c + 1);
                 const size_t idx_bl = static_cast<size_t>(r + 1) * cols + c;
 
-                VertexInfo vTL{{sx0, sy0}, grid_world[idx_tl], grid[idx_tl]};
-                VertexInfo vTR{{sx1, sy0}, grid_world[idx_tr], grid[idx_tr]};
-                VertexInfo vBR{{sx1, sy1}, grid_world[idx_br], grid[idx_br]};
-                VertexInfo vBL{{sx0, sy1}, grid_world[idx_bl], grid[idx_bl]};
+                const double v_tl = grid[idx_tl];
+                const double v_tr = grid[idx_tr];
+                const double v_br = grid[idx_br];
+                const double v_bl = grid[idx_bl];
+
+                // Fast skip for empty cells (all corners have identical signs)
+                const bool all_pos = (v_tl > 0.0) && (v_tr > 0.0) && (v_br > 0.0) && (v_bl > 0.0);
+                const bool all_neg = (v_tl <= 0.0) && (v_tr <= 0.0) && (v_br <= 0.0) && (v_bl <= 0.0);
+                if (all_pos || all_neg) continue;
+
+                VertexInfo vTL{{sx0, sy0}, grid_world[idx_tl], v_tl};
+                VertexInfo vTR{{sx1, sy0}, grid_world[idx_tr], v_tr};
+                VertexInfo vBR{{sx1, sy1}, grid_world[idx_br], v_br};
+                VertexInfo vBL{{sx0, sy1}, grid_world[idx_bl], v_bl};
 
                 const double sx_mid = (sx0 + sx1) * 0.5;
                 const double sy_mid = (sy0 + sy1) * 0.5;

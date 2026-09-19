@@ -19,10 +19,14 @@ double BytecodeVM::evaluate(
     const double* const vars = variables.data();
     const size_t var_count = variables.size();
     constexpr size_t kMaxVars = 64;
-    double local_vars[kMaxVars] = {0.0};
+    double local_vars[kMaxVars];
     const size_t initial_count = std::min(var_count, kMaxVars);
     for (size_t i = 0; i < initial_count; ++i) {
         local_vars[i] = vars[i];
+    }
+    const size_t total_needed = std::min(program.variable_names.size(), kMaxVars);
+    for (size_t i = initial_count; i < total_needed; ++i) {
+        local_vars[i] = 0.0;
     }
 
     for (size_t ip = 0; ip < inst_count; ++ip) {
