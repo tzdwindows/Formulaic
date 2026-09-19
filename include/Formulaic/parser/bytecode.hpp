@@ -130,6 +130,13 @@ enum class Opcode : uint8_t {
     GAUSSIAN,       // 3 args: x, mu, sigma
     CHIRP,          // 4 args: t, f0, t1, f1
 
+    // Discrete & Number Theoretic (GMP-accelerated)
+    GCD,            // 2 args
+    LCM,            // 2 args
+    FACT,           // 1 arg
+    BINOMIAL,       // 2 args
+    FIBONACCI,      // 1 arg
+
     RET
 };
 
@@ -249,6 +256,11 @@ struct FORMULAIC_API BytecodeProgram {
         case Opcode::DIRICHLET: return "DIRICHLET";
         case Opcode::GAUSSIAN: return "GAUSSIAN";
         case Opcode::CHIRP: return "CHIRP";
+        case Opcode::GCD: return "GCD";
+        case Opcode::LCM: return "LCM";
+        case Opcode::FACT: return "FACT";
+        case Opcode::BINOMIAL: return "BINOMIAL";
+        case Opcode::FIBONACCI: return "FIBONACCI";
         case Opcode::RET: return "RET";
         default: return "UNKNOWN";
     }

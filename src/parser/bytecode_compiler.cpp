@@ -315,6 +315,12 @@ Result<void> BytecodeCompiler::compile_node(const ASTNode& node) {
         else if (name == "dirichlet") emit(Opcode::DIRICHLET);
         else if (name == "gaussian") emit(Opcode::GAUSSIAN);
         else if (name == "chirp") emit(Opcode::CHIRP);
+        // Discrete & Number Theoretic (GMP)
+        else if (name == "gcd") emit(Opcode::GCD);
+        else if (name == "lcm") emit(Opcode::LCM);
+        else if (name == "fact" || name == "factorial") emit(Opcode::FACT);
+        else if (name == "bin" || name == "binomial" || name == "ncr") emit(Opcode::BINOMIAL);
+        else if (name == "fib" || name == "fibonacci") emit(Opcode::FIBONACCI);
         else {
             return Diagnostic{
                 ErrorCode::UnknownIdentifier,

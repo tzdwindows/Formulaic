@@ -336,6 +336,51 @@ int main() {
         std::cout << "PASSED -> Saved to " << bmp_path.string() << "\n";
     }
 
+    // 10. Asymptotic boundary & singularity test: y = ln(sin(x)) explicit & implicit
+    {
+        std::cout << "[Test 10] Asymptotic boundary & singularity: ln(sin(x))...\n";
+        formulaic::RasterEngine engine;
+        formulaic::GridStyle grid;
+        grid.show_grid = true;
+        grid.show_axes = true;
+
+        auto expr_exp = formulaic::Expression::parse("ln(sin(x))");
+        TEST_ASSERT(expr_exp.has_value(), "Parse ln(sin(x)) successful");
+
+        formulaic::FrameBuffer fb_exp(800, 600, formulaic::Color::BackgroundDark);
+        formulaic::Viewport vp(800, 600, formulaic::Rect2D(-10.0, 10.0, -10.0, 5.0));
+        engine.render_grid(fb_exp, vp, grid);
+        engine.plot_explicit(fb_exp, vp, expr_exp.value(), formulaic::Color::NeonBlue, 2.5);
+
+        int bottom_drawn_pixels = 0;
+        for (int x = 0; x < fb_exp.width(); ++x) {
+            for (int y = fb_exp.height() - 10; y < fb_exp.height(); ++y) {
+                if (fb_exp.get_pixel(x, y).b > 100) {
+                    ++bottom_drawn_pixels;
+                }
+            }
+        }
+        TEST_ASSERT(bottom_drawn_pixels > 0, "Explicit ln(sin(x)) plunges all the way to viewport bottom");
+
+        auto expr_imp = formulaic::Expression::parse("y - ln(sin(x))");
+        TEST_ASSERT(expr_imp.has_value(), "Parse y - ln(sin(x)) successful");
+
+        formulaic::FrameBuffer fb_imp(800, 600, formulaic::Color::BackgroundDark);
+        engine.render_grid(fb_imp, vp, grid);
+        engine.plot_implicit(fb_imp, vp, expr_imp.value(), formulaic::Color::NeonPink, 2.5);
+
+        int imp_bottom_drawn = 0;
+        for (int x = 0; x < fb_imp.width(); ++x) {
+            for (int y = fb_imp.height() - 10; y < fb_imp.height(); ++y) {
+                if (fb_imp.get_pixel(x, y).r > 100) {
+                    ++imp_bottom_drawn;
+                }
+            }
+        }
+        TEST_ASSERT(imp_bottom_drawn > 0, "Implicit ln(sin(x)) plunges all the way to viewport bottom");
+        std::cout << "PASSED -> ln(sin(x)) asymptotic boundary verified!\n";
+    }
+
     std::cout << "\n>>> All Offline Raster & Exporter Tests PASSED successfully! <<<\n";
     return 0;
 }

@@ -144,48 +144,155 @@ void RasterEngine::plot_explicit(
     const int num_samples = w * 2;
     const double dx_screen = static_cast<double>(w - 1) / (num_samples - 1);
 
+    auto to_screen = [&](double wx, double wy) -> Point2D {
+        Point2D cw{wx, wy};
+        if (hooks && hooks->has_coord_transform_hook()) {
+            cw = hooks->transform_coordinate(cw, vp);
+        }
+        return vp.world_to_screen_f(cw);
+    };
+
+    auto get_color = [&](double wx, double wy) -> Color {
+        if (hooks && hooks->has_pixel_shader_hook()) {
+            return hooks->shade_pixel(wx, wy, wy, color, time_t);
+        }
+        return color;
+    };
+
     bool prev_valid = false;
     Point2D prev_pt_screen{0.0, 0.0};
     double prev_y_world = 0.0;
+    double prev_x_world = 0.0;
 
     for (int i = 0; i < num_samples; ++i) {
         const double sx = i * dx_screen;
         Point2D world_pt = vp.screen_to_world(sx, 0.0);
         double y_val = expr.eval(world_pt.x, 0.0, time_t);
+        const bool curr_valid = !std::isnan(y_val) && !std::isinf(y_val);
 
-        if (std::isnan(y_val) || std::isinf(y_val)) {
+        if (!curr_valid) {
+            if (prev_valid) {
+                // Transition: valid -> invalid. Trace to boundary.
+                double x_lo = prev_x_world;
+                double x_hi = world_pt.x;
+                Point2D cur_pt = prev_pt_screen;
+
+                for (int step = 0; step < 20; ++step) {
+                    double x_mid = 0.5 * (x_lo + x_hi);
+                    double y_mid = expr.eval(x_mid, 0.0, time_t);
+                    if (!std::isnan(y_mid)) {
+                        if (std::isinf(y_mid)) {
+                            double inf_y = (y_mid < 0.0) ? (vp.bounds().y_min - 100.0) : (vp.bounds().y_max + 100.0);
+                            Point2D p_screen = to_screen(x_mid, inf_y);
+                            fb.draw_line_aa(cur_pt.x, cur_pt.y, p_screen.x, p_screen.y, get_color(x_mid, inf_y), line_thickness);
+                            break;
+                        }
+                        x_lo = x_mid;
+                        Point2D p_screen = to_screen(x_lo, y_mid);
+                        fb.draw_line_aa(cur_pt.x, cur_pt.y, p_screen.x, p_screen.y, get_color(x_lo, y_mid), line_thickness);
+                        cur_pt = p_screen;
+                        if (cur_pt.y < -20.0 || cur_pt.y > h + 20.0) {
+                            break;
+                        }
+                    } else {
+                        x_hi = x_mid;
+                    }
+                }
+            }
             prev_valid = false;
+            prev_x_world = world_pt.x;
             continue;
         }
 
-        Point2D curve_world{world_pt.x, y_val};
-        if (hooks && hooks->has_coord_transform_hook()) {
-            curve_world = hooks->transform_coordinate(curve_world, vp);
-        }
+        Point2D curr_pt_screen = to_screen(world_pt.x, y_val);
 
-        Point2D curr_pt_screen = vp.world_to_screen_f(curve_world);
+        if (!prev_valid) {
+            // Transition: invalid -> valid. Trace from boundary into curr_pt.
+            double x_inv = (i > 0) ? prev_x_world : (world_pt.x - 0.5 * (world_pt.x - vp.bounds().x_min));
+            double x_val = world_pt.x;
 
-        // Detect vertical asymptote singularity (e.g. tan(x), 1/x)
-        if (prev_valid) {
+            std::vector<std::pair<Point2D, Point2D>> entry_pts;
+            entry_pts.push_back({curr_pt_screen, {world_pt.x, y_val}});
+
+            for (int step = 0; step < 20; ++step) {
+                double x_mid = 0.5 * (x_inv + x_val);
+                double y_mid = expr.eval(x_mid, 0.0, time_t);
+                if (!std::isnan(y_mid)) {
+                    if (std::isinf(y_mid)) {
+                        double inf_y = (y_mid < 0.0) ? (vp.bounds().y_min - 100.0) : (vp.bounds().y_max + 100.0);
+                        entry_pts.push_back({to_screen(x_mid, inf_y), {x_mid, inf_y}});
+                        break;
+                    }
+                    x_val = x_mid;
+                    Point2D p_screen = to_screen(x_mid, y_mid);
+                    entry_pts.push_back({p_screen, {x_mid, y_mid}});
+                    if (p_screen.y < -20.0 || p_screen.y > h + 20.0) {
+                        break;
+                    }
+                } else {
+                    x_inv = x_mid;
+                }
+            }
+            for (int k = static_cast<int>(entry_pts.size()) - 1; k > 0; --k) {
+                fb.draw_line_aa(entry_pts[k].first.x, entry_pts[k].first.y,
+                                entry_pts[k-1].first.x, entry_pts[k-1].first.y,
+                                get_color(entry_pts[k].second.x, entry_pts[k].second.y),
+                                line_thickness);
+            }
+        } else {
+            // Both points valid. Detect vertical asymptote singularity (e.g. tan(x), 1/x)
             const double dy_screen = std::abs(curr_pt_screen.y - prev_pt_screen.y);
             const bool sign_flip_large = (prev_y_world * y_val < 0.0) && (std::abs(y_val - prev_y_world) > vp.bounds().height() * 0.5);
+
             if (dy_screen > h * 0.8 || sign_flip_large) {
-                // Skip line connecting asymptote jump
-                prev_valid = false;
-                continue;
-            }
+                // Skip line connecting asymptote jump, but trace both towards the asymptote
+                double x_lo = prev_x_world;
+                double x_hi = world_pt.x;
+                Point2D cur_p = prev_pt_screen;
+                for (int step = 0; step < 12; ++step) {
+                    double xm = 0.5 * (x_lo + x_hi);
+                    double ym = expr.eval(xm, 0.0, time_t);
+                    if (!std::isnan(ym) && (ym * prev_y_world > 0.0)) {
+                        x_lo = xm;
+                        Point2D p_s = to_screen(xm, ym);
+                        fb.draw_line_aa(cur_p.x, cur_p.y, p_s.x, p_s.y, get_color(xm, ym), line_thickness);
+                        cur_p = p_s;
+                        if (cur_p.y < -20.0 || cur_p.y > h + 20.0) break;
+                    } else {
+                        x_hi = xm;
+                    }
+                }
 
-            Color draw_color = color;
-            if (hooks && hooks->has_pixel_shader_hook()) {
-                draw_color = hooks->shade_pixel(world_pt.x, y_val, y_val, color, time_t);
+                double x_inv = prev_x_world;
+                double x_val = world_pt.x;
+                std::vector<std::pair<Point2D, Point2D>> e_pts;
+                e_pts.push_back({curr_pt_screen, {world_pt.x, y_val}});
+                for (int step = 0; step < 12; ++step) {
+                    double xm = 0.5 * (x_inv + x_val);
+                    double ym = expr.eval(xm, 0.0, time_t);
+                    if (!std::isnan(ym) && (ym * y_val > 0.0)) {
+                        x_val = xm;
+                        Point2D p_s = to_screen(xm, ym);
+                        e_pts.push_back({p_s, {xm, ym}});
+                        if (p_s.y < -20.0 || p_s.y > h + 20.0) break;
+                    } else {
+                        x_inv = xm;
+                    }
+                }
+                for (int k = static_cast<int>(e_pts.size()) - 1; k > 0; --k) {
+                    fb.draw_line_aa(e_pts[k].first.x, e_pts[k].first.y,
+                                    e_pts[k-1].first.x, e_pts[k-1].first.y,
+                                    get_color(e_pts[k].second.x, e_pts[k].second.y),
+                                    line_thickness);
+                }
+            } else {
+                fb.draw_line_aa(prev_pt_screen.x, prev_pt_screen.y, curr_pt_screen.x, curr_pt_screen.y, get_color(world_pt.x, y_val), line_thickness);
             }
-
-            // Always use distance-field sub-pixel anti-aliasing with continuous thickness
-            fb.draw_line_aa(prev_pt_screen.x, prev_pt_screen.y, curr_pt_screen.x, curr_pt_screen.y, draw_color, line_thickness);
         }
 
         prev_pt_screen = curr_pt_screen;
         prev_y_world = y_val;
+        prev_x_world = world_pt.x;
         prev_valid = true;
     }
 }
@@ -275,7 +382,10 @@ void RasterEngine::plot_implicit(
             }
             v = expr.eval(nudged.x, nudged.y, time_t);
             if (std::isnan(v) || std::isinf(v)) {
-                v = (v > 0.0 || (wpt.x >= 0.0 && wpt.y >= 0.0)) ? 1e7 : -1e7;
+                if (std::isinf(v)) {
+                    return (v > 0.0) ? 1e7 : -1e7;
+                }
+                return std::numeric_limits<double>::quiet_NaN();
             }
         }
         if (v > 1e7) return 1e7;
@@ -330,13 +440,66 @@ void RasterEngine::plot_implicit(
     };
 
     auto check_edge = [&](const VertexInfo& A, const VertexInfo& B) -> std::pair<bool, Point2D> {
-        if ((A.val > 0.0) == (B.val > 0.0)) return {false, {0.0, 0.0}};
+        const bool a_nan = std::isnan(A.val);
+        const bool b_nan = std::isnan(B.val);
+        if (a_nan && b_nan) return {false, {0.0, 0.0}};
 
         double t_low = 0.0;
         double t_high = 1.0;
         double v_low = A.val;
         double v_high = B.val;
-        bool hit_singularity = false;
+
+        if (a_nan || b_nan) {
+            if (a_nan) {
+                // A is NaN, B is valid. Search domain boundary between 0.0 and 1.0
+                double t_inv = 0.0;
+                double t_val = 1.0;
+                double v_bound = B.val;
+                for (int iter = 0; iter < 10; ++iter) {
+                    double tm = 0.5 * (t_inv + t_val);
+                    Point2D mid_w{A.world.x + tm * (B.world.x - A.world.x),
+                                  A.world.y + tm * (B.world.y - A.world.y)};
+                    if (hooks && hooks->has_coord_transform_hook()) mid_w = hooks->transform_coordinate(mid_w, vp);
+                    double vm = expr.eval(mid_w.x, mid_w.y, time_t);
+                    if (!std::isnan(vm)) {
+                        t_val = tm;
+                        v_bound = std::isinf(vm) ? ((vm > 0.0) ? 1e7 : -1e7) : vm;
+                    } else {
+                        t_inv = tm;
+                    }
+                }
+                if ((v_bound > 0.0) == (B.val > 0.0)) return {false, {0.0, 0.0}};
+                t_low = t_val;
+                v_low = v_bound;
+                t_high = 1.0;
+                v_high = B.val;
+            } else {
+                // A is valid, B is NaN. Search domain boundary between 0.0 and 1.0
+                double t_val = 0.0;
+                double t_inv = 1.0;
+                double v_bound = A.val;
+                for (int iter = 0; iter < 10; ++iter) {
+                    double tm = 0.5 * (t_val + t_inv);
+                    Point2D mid_w{A.world.x + tm * (B.world.x - A.world.x),
+                                  A.world.y + tm * (B.world.y - A.world.y)};
+                    if (hooks && hooks->has_coord_transform_hook()) mid_w = hooks->transform_coordinate(mid_w, vp);
+                    double vm = expr.eval(mid_w.x, mid_w.y, time_t);
+                    if (!std::isnan(vm)) {
+                        t_val = tm;
+                        v_bound = std::isinf(vm) ? ((vm > 0.0) ? 1e7 : -1e7) : vm;
+                    } else {
+                        t_inv = tm;
+                    }
+                }
+                if ((A.val > 0.0) == (v_bound > 0.0)) return {false, {0.0, 0.0}};
+                t_low = 0.0;
+                v_low = A.val;
+                t_high = t_val;
+                v_high = v_bound;
+            }
+        } else {
+            if ((A.val > 0.0) == (B.val > 0.0)) return {false, {0.0, 0.0}};
+        }
 
         for (int iter = 0; iter < 12; ++iter) {
             double t_mid = 0.5 * (t_low + t_high);
@@ -347,9 +510,16 @@ void RasterEngine::plot_implicit(
                 mid_wpt = hooks->transform_coordinate(mid_wpt, vp);
             }
             double vm = expr.eval(mid_wpt.x, mid_wpt.y, time_t);
-            if (std::isnan(vm) || std::isinf(vm)) {
-                hit_singularity = true;
-                break;
+            if (std::isnan(vm)) {
+                if (a_nan) {
+                    t_low = t_mid;
+                } else {
+                    t_high = t_mid;
+                }
+                continue;
+            }
+            if (std::isinf(vm)) {
+                vm = (vm > 0.0) ? 1e7 : -1e7;
             }
             if ((vm > 0.0) == (v_low > 0.0)) {
                 t_low = t_mid;
@@ -359,7 +529,6 @@ void RasterEngine::plot_implicit(
                 v_high = vm;
             }
         }
-        if (hit_singularity) return {false, {0.0, 0.0}};
 
         double t = 0.5 * (t_low + t_high);
         Point2D root_world{
@@ -371,49 +540,51 @@ void RasterEngine::plot_implicit(
             eval_root = hooks->transform_coordinate(eval_root, vp);
         }
         double vp_val = expr.eval(eval_root.x, eval_root.y, time_t);
-        if (std::isnan(vp_val) || std::isinf(vp_val)) return {false, {0.0, 0.0}};
+        if (std::isnan(vp_val)) return {false, {0.0, 0.0}};
 
         // Pole check 1: Residual at bisection root
-        const double min_corner = std::min(std::abs(A.val), std::abs(B.val));
-        if (std::abs(vp_val) > 2.0 && std::abs(vp_val) >= 0.5 * min_corner) {
-            return {false, {0.0, 0.0}};
-        }
-
-        // Pole check 2: Directional derivative vs secant
-        const double dx = B.world.x - A.world.x;
-        const double dy = B.world.y - A.world.y;
-        const double dist = std::hypot(dx, dy);
-        if (dist > 1e-12) {
-            const double ux = dx / dist;
-            const double uy = dy / dist;
-            const double secant = (B.val - A.val) / dist;
-            const double eps = 1e-5;
-
-            const double pAx = A.world.x + 0.1 * dx;
-            const double pAy = A.world.y + 0.1 * dy;
-            Point2D ptA_plus{pAx + eps * ux, pAy + eps * uy};
-            Point2D ptA_minus{pAx - eps * ux, pAy - eps * uy};
-            if (hooks && hooks->has_coord_transform_hook()) {
-                ptA_plus = hooks->transform_coordinate(ptA_plus, vp);
-                ptA_minus = hooks->transform_coordinate(ptA_minus, vp);
+        if (!a_nan && !b_nan) {
+            const double min_corner = std::min(std::abs(A.val), std::abs(B.val));
+            if (std::abs(vp_val) > 2.0 && std::abs(vp_val) >= 0.5 * min_corner) {
+                return {false, {0.0, 0.0}};
             }
-            const double dfA = (expr.eval(ptA_plus.x, ptA_plus.y, time_t) -
-                                expr.eval(ptA_minus.x, ptA_minus.y, time_t)) / (2.0 * eps);
 
-            const double pBx = B.world.x - 0.1 * dx;
-            const double pBy = B.world.y - 0.1 * dy;
-            Point2D ptB_plus{pBx + eps * ux, pBy + eps * uy};
-            Point2D ptB_minus{pBx - eps * ux, pBy - eps * uy};
-            if (hooks && hooks->has_coord_transform_hook()) {
-                ptB_plus = hooks->transform_coordinate(ptB_plus, vp);
-                ptB_minus = hooks->transform_coordinate(ptB_minus, vp);
-            }
-            const double dfB = (expr.eval(ptB_plus.x, ptB_plus.y, time_t) -
-                                expr.eval(ptB_minus.x, ptB_minus.y, time_t)) / (2.0 * eps);
+            // Pole check 2: Directional derivative vs secant
+            const double dx = B.world.x - A.world.x;
+            const double dy = B.world.y - A.world.y;
+            const double dist = std::hypot(dx, dy);
+            if (dist > 1e-12) {
+                const double ux = dx / dist;
+                const double uy = dy / dist;
+                const double secant = (B.val - A.val) / dist;
+                const double eps = 1e-5;
 
-            if (!std::isnan(dfA) && !std::isnan(dfB) && !std::isinf(dfA) && !std::isinf(dfB)) {
-                if ((secant * dfA < 0.0) && (secant * dfB < 0.0)) {
-                    return {false, {0.0, 0.0}};
+                const double pAx = A.world.x + 0.1 * dx;
+                const double pAy = A.world.y + 0.1 * dy;
+                Point2D ptA_plus{pAx + eps * ux, pAy + eps * uy};
+                Point2D ptA_minus{pAx - eps * ux, pAy - eps * uy};
+                if (hooks && hooks->has_coord_transform_hook()) {
+                    ptA_plus = hooks->transform_coordinate(ptA_plus, vp);
+                    ptA_minus = hooks->transform_coordinate(ptA_minus, vp);
+                }
+                const double dfA = (expr.eval(ptA_plus.x, ptA_plus.y, time_t) -
+                                    expr.eval(ptA_minus.x, ptA_minus.y, time_t)) / (2.0 * eps);
+
+                const double pBx = B.world.x - 0.1 * dx;
+                const double pBy = B.world.y - 0.1 * dy;
+                Point2D ptB_plus{pBx + eps * ux, pBy + eps * uy};
+                Point2D ptB_minus{pBx - eps * ux, pBy - eps * uy};
+                if (hooks && hooks->has_coord_transform_hook()) {
+                    ptB_plus = hooks->transform_coordinate(ptB_plus, vp);
+                    ptB_minus = hooks->transform_coordinate(ptB_minus, vp);
+                }
+                const double dfB = (expr.eval(ptB_plus.x, ptB_plus.y, time_t) -
+                                    expr.eval(ptB_minus.x, ptB_minus.y, time_t)) / (2.0 * eps);
+
+                if (!std::isnan(dfA) && !std::isnan(dfB) && !std::isinf(dfA) && !std::isinf(dfB)) {
+                    if ((secant * dfA < 0.0) && (secant * dfB < 0.0)) {
+                        return {false, {0.0, 0.0}};
+                    }
                 }
             }
         }
@@ -464,9 +635,10 @@ void RasterEngine::plot_implicit(
                 const double v_br = eval_safe(w_br);
                 const double v_bl = eval_safe(w_bl);
 
-                const bool sub_all_pos = (v_tl > 0.0) && (v_tr > 0.0) && (v_br > 0.0) && (v_bl > 0.0);
-                const bool sub_all_neg = (v_tl <= 0.0) && (v_tr <= 0.0) && (v_br <= 0.0) && (v_bl <= 0.0);
-                if (sub_all_pos || sub_all_neg) return;
+                const bool sub_all_pos = (!std::isnan(v_tl) && v_tl > 0.0) && (!std::isnan(v_tr) && v_tr > 0.0) && (!std::isnan(v_br) && v_br > 0.0) && (!std::isnan(v_bl) && v_bl > 0.0);
+                const bool sub_all_neg = (!std::isnan(v_tl) && v_tl <= 0.0) && (!std::isnan(v_tr) && v_tr <= 0.0) && (!std::isnan(v_br) && v_br <= 0.0) && (!std::isnan(v_bl) && v_bl <= 0.0);
+                const bool sub_all_nan = std::isnan(v_tl) && std::isnan(v_tr) && std::isnan(v_br) && std::isnan(v_bl);
+                if (sub_all_pos || sub_all_neg || sub_all_nan) return;
 
                 const double sub_sx_mid = (sub_sx0 + sub_sx1) * 0.5;
                 const double sub_sy_mid = (sub_sy0 + sub_sy1) * 0.5;
@@ -535,10 +707,11 @@ void RasterEngine::plot_implicit(
                 const double v_br = grid[idx_br];
                 const double v_bl = grid[idx_bl];
 
-                // Fast skip for empty cells (all corners have identical signs)
-                const bool all_pos = (v_tl > 0.0) && (v_tr > 0.0) && (v_br > 0.0) && (v_bl > 0.0);
-                const bool all_neg = (v_tl <= 0.0) && (v_tr <= 0.0) && (v_br <= 0.0) && (v_bl <= 0.0);
-                if (all_pos || all_neg) continue;
+                // Fast skip for empty cells (all corners have identical signs or all NaN)
+                const bool all_pos = (!std::isnan(v_tl) && v_tl > 0.0) && (!std::isnan(v_tr) && v_tr > 0.0) && (!std::isnan(v_br) && v_br > 0.0) && (!std::isnan(v_bl) && v_bl > 0.0);
+                const bool all_neg = (!std::isnan(v_tl) && v_tl <= 0.0) && (!std::isnan(v_tr) && v_tr <= 0.0) && (!std::isnan(v_br) && v_br <= 0.0) && (!std::isnan(v_bl) && v_bl <= 0.0);
+                const bool all_nan = std::isnan(v_tl) && std::isnan(v_tr) && std::isnan(v_br) && std::isnan(v_bl);
+                if (all_pos || all_neg || all_nan) continue;
 
                 VertexInfo vTL{{sx0, sy0}, grid_world[idx_tl], v_tl};
                 VertexInfo vTR{{sx1, sy0}, grid_world[idx_tr], v_tr};

@@ -1,4 +1,5 @@
 #include "bytecode_vm.hpp"
+#include <Formulaic/math/bigint.hpp>
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -605,6 +606,75 @@ double BytecodeVM::evaluate(
                     const double phase = two_pi * (f0 * t + 0.5 * c * t * t);
                     stack[sp - 4] = std::sin(phase);
                     sp -= 3;
+                }
+                break;
+
+            case Opcode::GCD:
+                if (sp >= 2) {
+                    const double a = stack[sp - 2];
+                    const double b = stack[sp - 1];
+                    if (std::isnan(a) || std::isnan(b) || std::isinf(a) || std::isinf(b)) {
+                        stack[sp - 2] = std::numeric_limits<double>::quiet_NaN();
+                    } else {
+                        math::BigInt bi_a(static_cast<int64_t>(std::round(a)));
+                        math::BigInt bi_b(static_cast<int64_t>(std::round(b)));
+                        stack[sp - 2] = math::BigInt::gcd(bi_a, bi_b).to_double();
+                    }
+                    --sp;
+                }
+                break;
+
+            case Opcode::LCM:
+                if (sp >= 2) {
+                    const double a = stack[sp - 2];
+                    const double b = stack[sp - 1];
+                    if (std::isnan(a) || std::isnan(b) || std::isinf(a) || std::isinf(b)) {
+                        stack[sp - 2] = std::numeric_limits<double>::quiet_NaN();
+                    } else {
+                        math::BigInt bi_a(static_cast<int64_t>(std::round(a)));
+                        math::BigInt bi_b(static_cast<int64_t>(std::round(b)));
+                        stack[sp - 2] = math::BigInt::lcm(bi_a, bi_b).to_double();
+                    }
+                    --sp;
+                }
+                break;
+
+            case Opcode::FACT:
+                if (sp >= 1) {
+                    const double n = stack[sp - 1];
+                    if (std::isnan(n) || std::isinf(n) || n < 0.0) {
+                        stack[sp - 1] = std::numeric_limits<double>::quiet_NaN();
+                    } else {
+                        const unsigned long un = static_cast<unsigned long>(std::round(n));
+                        stack[sp - 1] = math::BigInt::factorial(un).to_double();
+                    }
+                }
+                break;
+
+            case Opcode::BINOMIAL:
+                if (sp >= 2) {
+                    const double n = stack[sp - 2];
+                    const double k = stack[sp - 1];
+                    if (std::isnan(n) || std::isnan(k) || std::isinf(n) || std::isinf(k) || n < 0.0 || k < 0.0) {
+                        stack[sp - 2] = std::numeric_limits<double>::quiet_NaN();
+                    } else {
+                        const unsigned long un = static_cast<unsigned long>(std::round(n));
+                        const unsigned long uk = static_cast<unsigned long>(std::round(k));
+                        stack[sp - 2] = math::BigInt::binomial(un, uk).to_double();
+                    }
+                    --sp;
+                }
+                break;
+
+            case Opcode::FIBONACCI:
+                if (sp >= 1) {
+                    const double n = stack[sp - 1];
+                    if (std::isnan(n) || std::isinf(n) || n < 0.0) {
+                        stack[sp - 1] = std::numeric_limits<double>::quiet_NaN();
+                    } else {
+                        const unsigned long un = static_cast<unsigned long>(std::round(n));
+                        stack[sp - 1] = math::BigInt::fibonacci(un).to_double();
+                    }
                 }
                 break;
 

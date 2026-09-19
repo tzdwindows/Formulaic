@@ -10,7 +10,7 @@ set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 
 # Global compilation options
 if(MSVC)
-    add_compile_options(/W4 /WX- /wd4251 /permissive- /Zc:preprocessor /utf-8)
+    add_compile_options(/W4 /WX- /wd4251 /wd4146 /wd4244 /wd4267 /permissive- /Zc:preprocessor /utf-8)
 else()
     add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
@@ -20,6 +20,67 @@ option(FORMULAIC_BUILD_STATIC "Build Formulaic as static library" ON)
 option(FORMULAIC_BUILD_SHARED "Build Formulaic as shared library (DLL)" ON)
 option(FORMULAIC_BUILD_TESTS "Build Formulaic test suite in test/" ON)
 option(FORMULAIC_BUILD_EXAMPLES "Build Formulaic example applications in examples/" ON)
+option(FORMULAIC_ENABLE_GMP "Enable GNU Multiple Precision Arithmetic Library (GMP)" ON)
+
+# -----------------------------------------------------------------------------
+# Dependency: GMP (Native with assembly acceleration or cross-platform mini-gmp fallback)
+# -----------------------------------------------------------------------------
+if(FORMULAIC_ENABLE_GMP)
+    include(SelectLibraryConfigurations)
+    find_path(GMP_INCLUDE_DIR NAMES gmp.h
+        HINTS
+        $ENV{VCPKG_ROOT}/installed/$ENV{VCPKG_DEFAULT_TRIPLET}/include
+        E:/vcpkg/installed/x64-windows-static/include
+        E:/vcpkg/installed/x64-windows/include
+        /usr/include
+        /usr/local/include
+        /opt/homebrew/include
+    )
+    find_library(GMP_LIBRARY_RELEASE NAMES gmp gmp-10 libgmp
+        PATHS
+        $ENV{VCPKG_ROOT}/installed/$ENV{VCPKG_DEFAULT_TRIPLET}/lib
+        E:/vcpkg/installed/x64-windows-static/lib
+        E:/vcpkg/installed/x64-windows/lib
+        /usr/lib
+        /usr/local/lib
+        /opt/homebrew/lib
+        NO_DEFAULT_PATH
+    )
+    find_library(GMP_LIBRARY_DEBUG NAMES gmp gmp-10 libgmp
+        PATHS
+        $ENV{VCPKG_ROOT}/installed/$ENV{VCPKG_DEFAULT_TRIPLET}/debug/lib
+        E:/vcpkg/installed/x64-windows-static/debug/lib
+        E:/vcpkg/installed/x64-windows/debug/lib
+        NO_DEFAULT_PATH
+    )
+    select_library_configurations(GMP)
+
+    if(GMP_INCLUDE_DIR AND (GMP_LIBRARY_RELEASE OR GMP_LIBRARY_DEBUG))
+        message(STATUS "Found Native GMP: ${GMP_LIBRARIES} (headers: ${GMP_INCLUDE_DIR})")
+        set(FORMULAIC_GMP_DEF "FORMULAIC_HAS_NATIVE_GMP")
+        set(FORMULAIC_GMP_LIBS ${GMP_LIBRARIES})
+        set(FORMULAIC_GMP_INCLUDES ${GMP_INCLUDE_DIR})
+        set(FORMULAIC_GMP_EXTRA_SOURCES "")
+    else()
+        message(STATUS "Native GMP not found. Using bundled cross-platform mini-gmp.")
+        set(FORMULAIC_GMP_DEF "FORMULAIC_HAS_MINI_GMP")
+        set(FORMULAIC_GMP_LIBS "")
+        set(FORMULAIC_GMP_INCLUDES ${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/mini-gmp)
+        set(FORMULAIC_GMP_EXTRA_SOURCES
+            3rdparty/mini-gmp/mini-gmp.h
+            3rdparty/mini-gmp/mini-gmp.c
+            3rdparty/mini-gmp/mini-mpq.h
+            3rdparty/mini-gmp/mini-mpq.c
+        )
+        if(MSVC)
+            set_source_files_properties(
+                ${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/mini-gmp/mini-gmp.c
+                ${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/mini-gmp/mini-mpq.c
+                PROPERTIES COMPILE_FLAGS "/wd4146 /wd4244 /wd4267 /wd4018"
+            )
+        endif()
+    endif()
+endif()
 
 # Source files
 set(FORMULAIC_PUBLIC_HEADERS
@@ -41,6 +102,10 @@ set(FORMULAIC_PUBLIC_HEADERS
     include/Formulaic/hooks/pipeline_hooks.hpp
     include/Formulaic/math/calculus.hpp
     include/Formulaic/math/fft.hpp
+    include/Formulaic/math/gmp_types.hpp
+    include/Formulaic/math/bigint.hpp
+    include/Formulaic/math/rational.hpp
+    include/Formulaic/math/gmp_evaluator.hpp
     include/Formulaic/utils/timer.hpp
 )
 
@@ -56,6 +121,10 @@ set(FORMULAIC_SOURCES
     src/parser/expression.cpp
     src/math/calculus.cpp
     src/math/fft.cpp
+    src/math/bigint.cpp
+    src/math/rational.cpp
+    src/math/gmp_evaluator.cpp
+    ${FORMULAIC_GMP_EXTRA_SOURCES}
     src/render/color.cpp
     src/render/framebuffer.cpp
     src/render/image_export.cpp
@@ -79,6 +148,13 @@ if(FORMULAIC_BUILD_STATIC)
     target_include_directories(Formulaic_static PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
     )
+    if(FORMULAIC_ENABLE_GMP)
+        target_compile_definitions(Formulaic_static PUBLIC ${FORMULAIC_GMP_DEF})
+        target_include_directories(Formulaic_static PUBLIC ${FORMULAIC_GMP_INCLUDES})
+        if(FORMULAIC_GMP_LIBS)
+            target_link_libraries(Formulaic_static PUBLIC ${FORMULAIC_GMP_LIBS})
+        endif()
+    endif()
     if(WIN32)
         target_link_libraries(Formulaic_static PUBLIC gdi32 user32)
     endif()
@@ -103,6 +179,13 @@ if(FORMULAIC_BUILD_SHARED)
     target_include_directories(Formulaic_shared PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
     )
+    if(FORMULAIC_ENABLE_GMP)
+        target_compile_definitions(Formulaic_shared PUBLIC ${FORMULAIC_GMP_DEF})
+        target_include_directories(Formulaic_shared PUBLIC ${FORMULAIC_GMP_INCLUDES})
+        if(FORMULAIC_GMP_LIBS)
+            target_link_libraries(Formulaic_shared PUBLIC ${FORMULAIC_GMP_LIBS})
+        endif()
+    endif()
     if(WIN32)
         target_link_libraries(Formulaic_shared PUBLIC gdi32 user32)
     endif()

@@ -40,5 +40,5 @@ target_include_directories(test_editor_window PRIVATE ${CMAKE_CURRENT_SOURCE_DIR
 set_target_properties(test_editor_window PROPERTIES FOLDER "Tests")
 add_test(NAME test_editor_window COMMAND test_editor_window --automated)
 
-
-
+# 6. GNU Multiple Precision (GMP) BigInt, Rational & Evaluator Test
+add_formulaic_test(test_gmp test_gmp.cpp ${TEST_LIB_TARGET})
