@@ -8,7 +8,8 @@ readme_content = """# Formulaic
 [![CMake](https://img.shields.io/badge/CMake-3.20%2B-green.svg)](https://cmake.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![NuGet](https://img.shields.io/nuget/v/Formulaic.svg?style=flat&logo=nuget)](https://www.nuget.org/packages/Formulaic/)
-[![GitHub Release](https://img.shields.io/badge/Release-v1.1.2-orange.svg)](https://github.com/tzdwindows/Formulaic/releases)
+[![GitHub Release](https://img.shields.io/badge/Release-v1.1.3-orange.svg)](https://github.com/tzdwindows/Formulaic/releases)
+[![Architecture](https://img.shields.io/badge/Arch-x64%20%7C%20x86-blue.svg)]()
 [![Build & Test](https://img.shields.io/badge/CTest-100%25%20Passed-brightgreen.svg)]()
 
 **现代 C++20 高性能数学函数表达式解析、微积分/FFT 计算与高品质图形渲染库**

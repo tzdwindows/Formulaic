@@ -34,6 +34,7 @@
 # --- CMake Build Directories & Artifacts ---
 build/
 build-*/
+build_*/
 out/
 bin/
 lib/

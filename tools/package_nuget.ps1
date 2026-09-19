@@ -9,20 +9,53 @@ $buildNativeDir = Join-Path $nugetDir "build\native"
 $buildDir = Join-Path $nugetDir "build"
 $toolsDir = Join-Path $nugetDir "tools"
 
+# Create directories
+$platforms = @("x64", "x86")
+$configs = @("Release", "Debug")
+
+foreach ($p in $platforms) {
+    foreach ($c in $configs) {
+        New-Item -ItemType Directory -Force -Path (Join-Path $buildNativeDir "lib\$p\$c") | Out-Null
+        New-Item -ItemType Directory -Force -Path (Join-Path $buildNativeDir "bin\$p\$c") | Out-Null
+        New-Item -ItemType Directory -Force -Path (Join-Path $toolsDir "$p\$c") | Out-Null
+    }
+}
 New-Item -ItemType Directory -Force -Path (Join-Path $buildNativeDir "include") | Out-Null
-New-Item -ItemType Directory -Force -Path (Join-Path $buildNativeDir "lib\x64\Release") | Out-Null
-New-Item -ItemType Directory -Force -Path (Join-Path $buildNativeDir "bin\x64\Release") | Out-Null
-New-Item -ItemType Directory -Force -Path $toolsDir | Out-Null
 
 # 1. Copy headers
 Copy-Item -Recurse "F:\Formulaic\include\Formulaic" (Join-Path $buildNativeDir "include")
 
-# 2. Copy libs and dll
+# 2. Copy libs and dlls
+# x64 Release
 Copy-Item "F:\Formulaic\build\Release\Formulaic.lib" (Join-Path $buildNativeDir "lib\x64\Release")
 Copy-Item "F:\Formulaic\build\Release\Formulaic_static.lib" (Join-Path $buildNativeDir "lib\x64\Release")
 Copy-Item "F:\Formulaic\build\Release\Formulaic.dll" (Join-Path $buildNativeDir "bin\x64\Release")
+# x64 Debug
+Copy-Item "F:\Formulaic\build\Debug\Formulaic.lib" (Join-Path $buildNativeDir "lib\x64\Debug")
+Copy-Item "F:\Formulaic\build\Debug\Formulaic_static.lib" (Join-Path $buildNativeDir "lib\x64\Debug")
+Copy-Item "F:\Formulaic\build\Debug\Formulaic.dll" (Join-Path $buildNativeDir "bin\x64\Debug")
+
+# x86 Release
+Copy-Item "F:\Formulaic\build_x86\Release\Formulaic.lib" (Join-Path $buildNativeDir "lib\x86\Release")
+Copy-Item "F:\Formulaic\build_x86\Release\Formulaic_static.lib" (Join-Path $buildNativeDir "lib\x86\Release")
+Copy-Item "F:\Formulaic\build_x86\Release\Formulaic.dll" (Join-Path $buildNativeDir "bin\x86\Release")
+# x86 Debug
+Copy-Item "F:\Formulaic\build_x86\Debug\Formulaic.lib" (Join-Path $buildNativeDir "lib\x86\Debug")
+Copy-Item "F:\Formulaic\build_x86\Debug\Formulaic_static.lib" (Join-Path $buildNativeDir "lib\x86\Debug")
+Copy-Item "F:\Formulaic\build_x86\Debug\Formulaic.dll" (Join-Path $buildNativeDir "bin\x86\Debug")
 
 # 3. Copy tools
+Copy-Item "F:\Formulaic\build\test\Release\test_editor_window.exe" (Join-Path $toolsDir "x64\Release")
+Copy-Item "F:\Formulaic\build\examples\Release\example_interactive_window.exe" (Join-Path $toolsDir "x64\Release")
+Copy-Item "F:\Formulaic\build\test\Debug\test_editor_window.exe" (Join-Path $toolsDir "x64\Debug")
+Copy-Item "F:\Formulaic\build\examples\Debug\example_interactive_window.exe" (Join-Path $toolsDir "x64\Debug")
+
+Copy-Item "F:\Formulaic\build_x86\test\Release\test_editor_window.exe" (Join-Path $toolsDir "x86\Release")
+Copy-Item "F:\Formulaic\build_x86\examples\Release\example_interactive_window.exe" (Join-Path $toolsDir "x86\Release")
+Copy-Item "F:\Formulaic\build_x86\test\Debug\test_editor_window.exe" (Join-Path $toolsDir "x86\Debug")
+Copy-Item "F:\Formulaic\build_x86\examples\Debug\example_interactive_window.exe" (Join-Path $toolsDir "x86\Debug")
+
+# Default root tools (x64 Release)
 Copy-Item "F:\Formulaic\build\test\Release\test_editor_window.exe" $toolsDir
 Copy-Item "F:\Formulaic\build\examples\Release\example_interactive_window.exe" $toolsDir
 
@@ -30,21 +63,28 @@ Copy-Item "F:\Formulaic\build\examples\Release\example_interactive_window.exe" $
 $nativeTargetsContent = @"
 <?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
-  <ItemDefinitionGroup>
+  <PropertyGroup>
+    <FormulaicPlatform Condition="'`$(Platform)' == 'Win32' Or '`$(Platform)' == 'x86'">x86</FormulaicPlatform>
+    <FormulaicPlatform Condition="'`$(Platform)' == 'x64'">x64</FormulaicPlatform>
+    <FormulaicConfig Condition="'`$(Configuration)' == 'Debug'">Debug</FormulaicConfig>
+    <FormulaicConfig Condition="'`$(Configuration)' != 'Debug'">Release</FormulaicConfig>
+  </PropertyGroup>
+
+  <ItemDefinitionGroup Condition="'`$(FormulaicPlatform)' != ''">
     <ClCompile>
       <AdditionalIncludeDirectories>`$(MSBuildThisFileDirectory)include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <LanguageStandard Condition="'`$(LanguageStandard)' == '' Or '`$(LanguageStandard)' &lt; 'stdcpp20'">stdcpp20</LanguageStandard>
     </ClCompile>
-    <Link Condition="'`$(Platform)' == 'x64' And '`$(FormulaicUseStatic)' != 'true'">
-      <AdditionalDependencies>`$(MSBuildThisFileDirectory)lib\x64\Release\Formulaic.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    <Link Condition="'`$(FormulaicUseStatic)' != 'true'">
+      <AdditionalDependencies>`$(MSBuildThisFileDirectory)lib\`$(FormulaicPlatform)\`$(FormulaicConfig)\Formulaic.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
-    <Link Condition="'`$(Platform)' == 'x64' And '`$(FormulaicUseStatic)' == 'true'">
-      <AdditionalDependencies>`$(MSBuildThisFileDirectory)lib\x64\Release\Formulaic_static.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    <Link Condition="'`$(FormulaicUseStatic)' == 'true'">
+      <AdditionalDependencies>`$(MSBuildThisFileDirectory)lib\`$(FormulaicPlatform)\`$(FormulaicConfig)\Formulaic_static.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
 
-  <ItemGroup Condition="'`$(Platform)' == 'x64' And '`$(FormulaicUseStatic)' != 'true'">
-    <ReferenceCopyLocalPaths Include="`$(MSBuildThisFileDirectory)bin\x64\Release\Formulaic.dll" />
+  <ItemGroup Condition="'`$(FormulaicPlatform)' != '' And '`$(FormulaicUseStatic)' != 'true'">
+    <ReferenceCopyLocalPaths Include="`$(MSBuildThisFileDirectory)bin\`$(FormulaicPlatform)\`$(FormulaicConfig)\Formulaic.dll" />
   </ItemGroup>
 </Project>
 "@
