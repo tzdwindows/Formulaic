@@ -2,22 +2,19 @@ $ErrorActionPreference = "Stop"
 
 $token = $env:GITHUB_TOKEN
 if (-not $token) {
-    $credInput = "protocol=https`nhost=github.com`n`n"
-    $credOutput = $credInput | git credential fill
-    foreach ($line in ($credOutput -split "`n")) {
-        if ($line -match "^password=(.*)$") {
-            $token = $matches[1].Trim()
-        }
-    }
+    try {
+        $token = python -c "import subprocess; p = subprocess.Popen(['git', 'credential', 'fill'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True); out, _ = p.communicate('protocol=https\nhost=github.com\n\n'); print(next((line.split('=', 1)[1].strip() for line in out.splitlines() if line.startswith('password=')), ''))"
+    } catch {}
 }
 if (-not $token) {
     throw "GitHub token not found. Please set GITHUB_TOKEN environment variable or configure git credentials."
 }
 
 $repo = "tzdwindows/Formulaic"
+$tag = "v1.2.0"
 $releaseName = "v1.2.0: Interactive 3D Surface Preview, Bidirectional LaTeXLive Engine, Vector LaTeX Visual Renderer & GMP Multi-Precision"
 
-$releaseBody = @"
+$releaseBody = @'
 # Formulaic v1.2.0 Release Notes
 
 We are thrilled to announce **Formulaic v1.2.0**, a major milestone release featuring **interactive 3D surface mathematical visualization**, full bidirectional **LaTeXLive** mathematical formula conversion, academic-grade **vector LaTeX visual math rendering**, portable multi-precision arithmetic via **GNU MP (GMP / mini-gmp)**, and major upgrades to the interactive mathematical studio!
@@ -81,7 +78,7 @@ We are thrilled to announce **Formulaic v1.2.0**, a major milestone release feat
 1. `Formulaic-v1.2.0-windows-x64.zip` (64-bit Windows Release & Debug DLLs, static libs, executables, C++20 headers)
 2. `Formulaic-v1.2.0-windows-x86.zip` (32-bit Windows Release & Debug DLLs, static libs, executables, C++20 headers)
 3. `Formulaic-v1.2.0-windows-all.zip` (Unified multi-platform distribution package)
-"@
+'@
 
 $headers = @{
     "Authorization" = "Bearer $token"
