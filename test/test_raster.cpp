@@ -119,6 +119,46 @@ int main() {
         std::cout << "PASSED -> Saved to " << bmp_path.string() << "\n";
     }
 
+    // 4b. Implicit 2D Asymptote / Pole Rejection Test (1/x + 1/y = 0)
+    {
+        std::cout << "[Test 4b] Implicit Function Asymptote & Pole Rejection (1/x + 1/y = 0)... ";
+        formulaic::FrameBuffer fb(800, 600, formulaic::Color::BackgroundDark);
+        formulaic::Viewport vp(800, 600, formulaic::Rect2D(-3.0, 3.0, -3.0, 3.0));
+        formulaic::RasterEngine engine;
+
+        auto expr = formulaic::Expression::parse_equation("1/x + 1/y = 0");
+        TEST_ASSERT(expr.has_value(), expr.error().format());
+        engine.plot_implicit(fb, vp, expr.value(), formulaic::Color::NeonPink, 2);
+
+        // Check that pixels on the positive x axis (x = 2.0, y = 0.0) are NOT drawn in pink
+        const int test_x = 666;
+        const int test_y = 300;
+        formulaic::Color col_axis = fb.get_pixel(test_x, test_y);
+        TEST_ASSERT(col_axis == formulaic::Color::BackgroundDark, "Positive x axis must not contain spurious pole line");
+
+        // Check that positive y axis (x = 0.0, y = 2.0) is NOT drawn in pink
+        formulaic::Color col_y_axis = fb.get_pixel(400, 100);
+        TEST_ASSERT(col_y_axis == formulaic::Color::BackgroundDark, "Positive y axis must not contain spurious pole line");
+
+        // Check that the true curve point on y = -x (e.g. x = -1.5, y = 1.5) IS drawn
+        bool found_diag_pixel = false;
+        for (int dy = -2; dy <= 2; ++dy) {
+            for (int dx = -2; dx <= 2; ++dx) {
+                if (fb.get_pixel(200 + dx, 150 + dy) != formulaic::Color::BackgroundDark) {
+                    found_diag_pixel = true;
+                    break;
+                }
+            }
+            if (found_diag_pixel) break;
+        }
+        TEST_ASSERT(found_diag_pixel, "True diagonal curve y = -x must be rendered");
+
+        auto bmp_path = output_dir / "test_pole_rejection_1_x_1_y.bmp";
+        auto res = formulaic::ImageExport::save_bmp(fb, bmp_path);
+        TEST_ASSERT(res.has_value(), res.error().format());
+        std::cout << "PASSED -> Saved to " << bmp_path.string() << "\n";
+    }
+
     // 5. Scalar Field 2D Heatmap
     {
         std::cout << "[Test 5] Scalar Field Heatmap Rasterization... ";

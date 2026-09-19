@@ -58,6 +58,8 @@ struct Color {
         return Color(r, g, b, new_alpha);
     }
 
+    constexpr bool operator==(const Color&) const noexcept = default;
+
     [[nodiscard]] static Color lerp(const Color& c1, const Color& c2, double t) noexcept {
         t = std::clamp(t, 0.0, 1.0);
         return Color(

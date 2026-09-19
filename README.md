@@ -6,7 +6,7 @@
 [![CMake](https://img.shields.io/badge/CMake-3.20%2B-green.svg)](https://cmake.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![NuGet](https://img.shields.io/nuget/v/Formulaic.svg?style=flat&logo=nuget)](https://www.nuget.org/packages/Formulaic/)
-[![GitHub Release](https://img.shields.io/badge/Release-v1.1.0-orange.svg)](https://github.com/tzdwindows/Formulaic/releases)
+[![GitHub Release](https://img.shields.io/badge/Release-v1.1.1-orange.svg)](https://github.com/tzdwindows/Formulaic/releases)
 [![Build & Test](https://img.shields.io/badge/CTest-100%25%20Passed-brightgreen.svg)]()
 
 **现代 C++20 高性能数学函数表达式解析、微积分/FFT 计算与高品质图形渲染库**

@@ -69,10 +69,10 @@ if (-not (Test-Path $distDir)) {
 $nugetExe = "F:\Formulaic\tools\nuget.exe"
 & $nugetExe pack "F:\Formulaic\Formulaic.nuspec" -OutputDirectory $distDir -BasePath "F:\Formulaic"
 
-$nupkg = Join-Path $distDir "Formulaic.1.1.0.nupkg"
-if (Test-Path $nupkg) {
+$nupkg = Get-ChildItem -Path $distDir -Filter "Formulaic.*.nupkg" | Sort-Object LastWriteTime -Descending | Select-Object -First 1 -ExpandProperty FullName
+if ($nupkg -and (Test-Path $nupkg)) {
     $sz = (Get-Item $nupkg).Length
     Write-Output "Successfully generated NuGet package: $nupkg ($sz bytes)"
 } else {
-    throw "Failed to find generated package at $nupkg"
+    throw "Failed to find generated package in $distDir"
 }

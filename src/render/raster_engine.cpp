@@ -255,6 +255,7 @@ void RasterEngine::plot_implicit(
     const int rows = (fb.height() + kStep - 1) / kStep + 1;
 
     std::vector<double> grid(static_cast<size_t>(cols) * rows);
+    std::vector<Point2D> grid_world(static_cast<size_t>(cols) * rows);
 
     // 1. Evaluate grid vertices
     for (int r = 0; r < rows; ++r) {
@@ -265,20 +266,78 @@ void RasterEngine::plot_implicit(
             if (hooks && hooks->has_coord_transform_hook()) {
                 wpt = hooks->transform_coordinate(wpt, vp);
             }
-            grid[static_cast<size_t>(r) * cols + c] = expr.eval(wpt.x, wpt.y, time_t);
+            const size_t idx = static_cast<size_t>(r) * cols + c;
+            grid_world[idx] = wpt;
+            grid[idx] = expr.eval(wpt.x, wpt.y, time_t);
         }
     }
 
-    auto lerp_edge = [](double v1, double v2) -> double {
-        const double denom = v2 - v1;
-        if (std::abs(denom) < 1e-9) return 0.5;
-        return std::clamp(-v1 / denom, 0.0, 1.0);
+    auto check_edge = [&](double vA, double vB, const Point2D& wA, const Point2D& wB) -> std::pair<bool, double> {
+        if ((vA > 0) == (vB > 0)) return {false, 0.5};
+        const double denom = vB - vA;
+        if (std::abs(denom) < 1e-9) return {false, 0.5};
+        const double t = std::clamp(-vA / denom, 0.0, 1.0);
+
+        // Evaluate candidate root in world coordinates
+        const double wpx = wA.x + t * (wB.x - wA.x);
+        const double wpy = wA.y + t * (wB.y - wA.y);
+        const double vp_val = expr.eval(wpx, wpy, time_t);
+
+        if (std::isnan(vp_val) || std::isinf(vp_val)) {
+            return {false, t};
+        }
+
+        // Singularity / Pole check 1:
+        // On a continuous function crossing zero, the residual at the linear interpolation root
+        // must drop significantly compared to the corner values. If |vp_val| >= min(|vA|, |vB|) and is non-trivial,
+        // it signifies a jump discontinuity / pole rather than a true zero crossing.
+        const double min_corner = std::min(std::abs(vA), std::abs(vB));
+        if (std::abs(vp_val) >= min_corner && std::abs(vp_val) > 1.0) {
+            return {false, t};
+        }
+
+        // Singularity / Pole check 2: Directional derivative vs secant slope
+        // Across an asymptotic pole (e.g. 1/x jumping from -inf to +inf), the secant is positive,
+        // but the actual derivative d/dx(1/x) = -1/x^2 is negative on both sides.
+        const double dx = wB.x - wA.x;
+        const double dy = wB.y - wA.y;
+        const double dist = std::hypot(dx, dy);
+        if (dist > 1e-12) {
+            const double ux = dx / dist;
+            const double uy = dy / dist;
+            const double secant = (vB - vA) / dist;
+            const double eps = 1e-5;
+
+            const double pAx = wA.x + 0.1 * dx;
+            const double pAy = wA.y + 0.1 * dy;
+            const double dfA = (expr.eval(pAx + eps * ux, pAy + eps * uy, time_t) -
+                                expr.eval(pAx - eps * ux, pAy - eps * uy, time_t)) / (2.0 * eps);
+
+            const double pBx = wB.x - 0.1 * dx;
+            const double pBy = wB.y - 0.1 * dy;
+            const double dfB = (expr.eval(pBx + eps * ux, pBy + eps * uy, time_t) -
+                                expr.eval(pBx - eps * ux, pBy - eps * uy, time_t)) / (2.0 * eps);
+
+            if (!std::isnan(dfA) && !std::isnan(dfB) && !std::isinf(dfA) && !std::isinf(dfB)) {
+                if ((secant * dfA < 0.0) && (secant * dfB < 0.0)) {
+                    return {false, t};
+                }
+            }
+        }
+
+        return {true, t};
     };
 
     auto draw_seg = [&](Point2D p1, Point2D p2) {
+        Point2D mid_world = vp.screen_to_world((p1.x + p2.x) * 0.5, (p1.y + p2.y) * 0.5);
+        if (hooks && hooks->has_coord_transform_hook()) {
+            mid_world = hooks->transform_coordinate(mid_world, vp);
+        }
+        const double vm = expr.eval(mid_world.x, mid_world.y, time_t);
+        if (std::isnan(vm) || std::isinf(vm)) return;
+
         Color c = color;
         if (hooks && hooks->has_pixel_shader_hook()) {
-            Point2D mid_world = vp.screen_to_world((p1.x + p2.x) * 0.5, (p1.y + p2.y) * 0.5);
             c = hooks->shade_pixel(mid_world.x, mid_world.y, 0.0, color, time_t);
         }
         // Sub-pixel floating-point anti-aliased segment
@@ -294,12 +353,18 @@ void RasterEngine::plot_implicit(
             const double sx0 = c * kStep;
             const double sx1 = (c + 1) * kStep;
 
-            const double v_tl = grid[static_cast<size_t>(r) * cols + c];
-            const double v_tr = grid[static_cast<size_t>(r) * cols + (c + 1)];
-            const double v_br = grid[static_cast<size_t>(r + 1) * cols + (c + 1)];
-            const double v_bl = grid[static_cast<size_t>(r + 1) * cols + c];
+            const size_t idx_tl = static_cast<size_t>(r) * cols + c;
+            const size_t idx_tr = static_cast<size_t>(r) * cols + (c + 1);
+            const size_t idx_br = static_cast<size_t>(r + 1) * cols + (c + 1);
+            const size_t idx_bl = static_cast<size_t>(r + 1) * cols + c;
+
+            const double v_tl = grid[idx_tl];
+            const double v_tr = grid[idx_tr];
+            const double v_br = grid[idx_br];
+            const double v_bl = grid[idx_bl];
 
             if (std::isnan(v_tl) || std::isnan(v_tr) || std::isnan(v_br) || std::isnan(v_bl)) continue;
+            if (std::isinf(v_tl) || std::isinf(v_tr) || std::isinf(v_br) || std::isinf(v_bl)) continue;
 
             const uint8_t mask = ((v_tl > 0) ? 8 : 0) |
                                  ((v_tr > 0) ? 4 : 0) |
@@ -308,27 +373,42 @@ void RasterEngine::plot_implicit(
 
             if (mask == 0 || mask == 15) continue;
 
-            // Interpolated edge points: top, right, bottom, left
-            const Point2D pt_top{sx0 + lerp_edge(v_tl, v_tr) * (sx1 - sx0), sy0};
-            const Point2D pt_right{sx1, sy0 + lerp_edge(v_tr, v_br) * (sy1 - sy0)};
-            const Point2D pt_bottom{sx0 + lerp_edge(v_bl, v_br) * (sx1 - sx0), sy1};
-            const Point2D pt_left{sx0, sy0 + lerp_edge(v_tl, v_bl) * (sy1 - sy0)};
+            const auto& w_tl = grid_world[idx_tl];
+            const auto& w_tr = grid_world[idx_tr];
+            const auto& w_br = grid_world[idx_br];
+            const auto& w_bl = grid_world[idx_bl];
+
+            const auto [valid_top, t_top] = check_edge(v_tl, v_tr, w_tl, w_tr);
+            const auto [valid_right, t_right] = check_edge(v_tr, v_br, w_tr, w_br);
+            const auto [valid_bottom, t_bottom] = check_edge(v_bl, v_br, w_bl, w_br);
+            const auto [valid_left, t_left] = check_edge(v_tl, v_bl, w_tl, w_bl);
+
+            const Point2D pt_top{sx0 + t_top * (sx1 - sx0), sy0};
+            const Point2D pt_right{sx1, sy0 + t_right * (sy1 - sy0)};
+            const Point2D pt_bottom{sx0 + t_bottom * (sx1 - sx0), sy1};
+            const Point2D pt_left{sx0, sy0 + t_left * (sy1 - sy0)};
 
             switch (mask) {
-                case 1:  draw_seg(pt_left, pt_bottom); break;
-                case 2:  draw_seg(pt_bottom, pt_right); break;
-                case 3:  draw_seg(pt_left, pt_right); break;
-                case 4:  draw_seg(pt_top, pt_right); break;
-                case 5:  draw_seg(pt_left, pt_top); draw_seg(pt_bottom, pt_right); break;
-                case 6:  draw_seg(pt_top, pt_bottom); break;
-                case 7:  draw_seg(pt_left, pt_top); break;
-                case 8:  draw_seg(pt_left, pt_top); break;
-                case 9:  draw_seg(pt_top, pt_bottom); break;
-                case 10: draw_seg(pt_top, pt_right); draw_seg(pt_left, pt_bottom); break;
-                case 11: draw_seg(pt_top, pt_right); break;
-                case 12: draw_seg(pt_left, pt_right); break;
-                case 13: draw_seg(pt_bottom, pt_right); break;
-                case 14: draw_seg(pt_left, pt_bottom); break;
+                case 1:  if (valid_left && valid_bottom) draw_seg(pt_left, pt_bottom); break;
+                case 2:  if (valid_bottom && valid_right) draw_seg(pt_bottom, pt_right); break;
+                case 3:  if (valid_left && valid_right) draw_seg(pt_left, pt_right); break;
+                case 4:  if (valid_top && valid_right) draw_seg(pt_top, pt_right); break;
+                case 5:
+                    if (valid_left && valid_top) draw_seg(pt_left, pt_top);
+                    if (valid_bottom && valid_right) draw_seg(pt_bottom, pt_right);
+                    break;
+                case 6:  if (valid_top && valid_bottom) draw_seg(pt_top, pt_bottom); break;
+                case 7:  if (valid_left && valid_top) draw_seg(pt_left, pt_top); break;
+                case 8:  if (valid_left && valid_top) draw_seg(pt_left, pt_top); break;
+                case 9:  if (valid_top && valid_bottom) draw_seg(pt_top, pt_bottom); break;
+                case 10:
+                    if (valid_top && valid_right) draw_seg(pt_top, pt_right);
+                    if (valid_left && valid_bottom) draw_seg(pt_left, pt_bottom);
+                    break;
+                case 11: if (valid_top && valid_right) draw_seg(pt_top, pt_right); break;
+                case 12: if (valid_left && valid_right) draw_seg(pt_left, pt_right); break;
+                case 13: if (valid_bottom && valid_right) draw_seg(pt_bottom, pt_right); break;
+                case 14: if (valid_left && valid_bottom) draw_seg(pt_left, pt_bottom); break;
                 default: break;
             }
         }
