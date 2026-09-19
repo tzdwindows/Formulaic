@@ -2,6 +2,7 @@
 #include <Formulaic/math/calculus.hpp>
 #include <Formulaic/math/fft.hpp>
 #include <Formulaic/parser/expression.hpp>
+#include <Formulaic/parser/latex_converter.hpp>
 #include <Formulaic/render/color.hpp>
 #include <Formulaic/render/framebuffer.hpp>
 #include <Formulaic/render/raster_engine.hpp>
@@ -41,15 +42,17 @@
     } while (0)
 
 // Control IDs
-constexpr int IDC_EDIT_EXPR   = 1001;
-constexpr int IDC_BTN_RENDER  = 1002;
-constexpr int IDC_BTN_PRESET1 = 1003;
-constexpr int IDC_BTN_PRESET2 = 1004;
-constexpr int IDC_BTN_PRESET3 = 1005;
-constexpr int IDC_BTN_PRESET4 = 1006;
-constexpr int IDC_STATUS_TEXT = 1007;
-constexpr int IDC_COMBO_MODE  = 1008;
-constexpr int IDC_AC_LIST     = 1009;
+constexpr int IDC_EDIT_EXPR      = 1001;
+constexpr int IDC_BTN_RENDER     = 1002;
+constexpr int IDC_BTN_PRESET1    = 1003;
+constexpr int IDC_BTN_PRESET2    = 1004;
+constexpr int IDC_BTN_PRESET3    = 1005;
+constexpr int IDC_BTN_PRESET4    = 1006;
+constexpr int IDC_STATUS_TEXT    = 1007;
+constexpr int IDC_COMBO_MODE     = 1008;
+constexpr int IDC_AC_LIST        = 1009;
+constexpr int IDC_BTN_COPY_LATEX = 1010;
+constexpr int IDC_EDIT_LATEX     = 1011;
 
 constexpr UINT_PTR TIMER_ANIM_ID     = 2001;
 constexpr UINT_PTR TIMER_DEBOUNCE_ID = 2002;
@@ -196,6 +199,9 @@ struct EditorWindowState {
     HWND hwnd_status{nullptr};
     HWND hwnd_render{nullptr};
     HWND hwnd_combo_mode{nullptr};
+    HWND hwnd_latex_edit{nullptr};
+    HWND hwnd_btn_copy_latex{nullptr};
+    std::string current_latex;
 
     HWND hwnd_ac_popup{nullptr};
     HWND hwnd_ac_list{nullptr};
@@ -731,7 +737,23 @@ static void update_expression_from_edit(EditorWindowState* state) {
         state->is_valid_expr = false;
         state->error_message = "Enter a formula or variable script";
         SetWindowTextA(state->hwnd_status, state->error_message.c_str());
+        state->current_latex.clear();
+        if (state->hwnd_latex_edit) SetWindowTextA(state->hwnd_latex_edit, "");
         return;
+    }
+
+    // Real-time conversion to standard LaTeXLive
+    auto latex_res = formulaic::LatexConverter::convert(text);
+    if (latex_res) {
+        state->current_latex = latex_res.value();
+        if (state->hwnd_latex_edit) {
+            SetWindowTextA(state->hwnd_latex_edit, state->current_latex.c_str());
+        }
+    } else {
+        state->current_latex.clear();
+        if (state->hwnd_latex_edit) {
+            SetWindowTextA(state->hwnd_latex_edit, "(LaTeX conversion pending or syntax error)");
+        }
     }
 
     // Check if user entered an equation LHS = RHS (single-line or multi-line declarations ending in an equation)
@@ -941,6 +963,26 @@ static LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
                 update_expression_from_edit(state);
                 return 0;
             }
+            if (id == IDC_BTN_COPY_LATEX && code == BN_CLICKED) {
+                if (state && !state->current_latex.empty()) {
+                    if (OpenClipboard(hwnd)) {
+                        EmptyClipboard();
+                        const std::string& str = state->current_latex;
+                        HGLOBAL hglb = GlobalAlloc(GMEM_MOVEABLE, str.size() + 1);
+                        if (hglb) {
+                            char* lptstr = static_cast<char*>(GlobalLock(hglb));
+                            if (lptstr) {
+                                memcpy(lptstr, str.c_str(), str.size() + 1);
+                                GlobalUnlock(hglb);
+                                SetClipboardData(CF_TEXT, hglb);
+                            }
+                        }
+                        CloseClipboard();
+                        SetWindowTextA(state->hwnd_status, "Status: LaTeXLive formula copied to clipboard!");
+                    }
+                }
+                return 0;
+            }
             break;
         }
 
@@ -948,6 +990,12 @@ static LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
             HDC hdc = reinterpret_cast<HDC>(wparam);
             HWND hctrl = reinterpret_cast<HWND>(lparam);
             SetBkMode(hdc, TRANSPARENT);
+
+            if (state && hctrl == state->hwnd_latex_edit) {
+                SetBkColor(hdc, RGB(24, 24, 37));
+                SetTextColor(hdc, RGB(180, 230, 255)); // Soft Cyan for LaTeX
+                return reinterpret_cast<LRESULT>(state->edit_bg_brush);
+            }
 
             if (state && hctrl == state->hwnd_status) {
                 if (state->is_valid_expr) {
@@ -963,6 +1011,12 @@ static LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
 
         case WM_CTLCOLOREDIT: {
             HDC hdc = reinterpret_cast<HDC>(wparam);
+            HWND hctrl = reinterpret_cast<HWND>(lparam);
+            if (state && hctrl == state->hwnd_latex_edit) {
+                SetBkColor(hdc, RGB(24, 24, 37));
+                SetTextColor(hdc, RGB(180, 230, 255));
+                return reinterpret_cast<LRESULT>(state->edit_bg_brush);
+            }
             SetBkColor(hdc, RGB(26, 26, 36));
             SetTextColor(hdc, RGB(120, 220, 255));
             return reinterpret_cast<LRESULT>(state ? state->edit_bg_brush : GetStockObject(BLACK_BRUSH));
@@ -1086,8 +1140,8 @@ int main(int argc, char* argv[]) {
     state->font_ui    = CreateFontA(14, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, ANSI_CHARSET, 0, 0, CLEARTYPE_QUALITY, 0, "Segoe UI");
     state->start_time = std::chrono::high_resolution_clock::now();
 
-    const int init_win_w = 1200;
-    const int init_win_h = 750;
+    const int init_win_w = 1250;
+    const int init_win_h = 800;
 
     HWND hwnd_main = CreateWindowExA(
         0,
@@ -1125,7 +1179,7 @@ int main(int argc, char* argv[]) {
         edit_class_name,
         initial_script.c_str(),
         WS_CHILD | WS_VISIBLE | WS_VSCROLL | ES_MULTILINE | ES_AUTOVSCROLL | ES_WANTRETURN,
-        15, 65, left_w, 180,
+        15, 65, left_w, 160,
         hwnd_main,
         reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_EDIT_EXPR)),
         hinstance, nullptr
@@ -1166,14 +1220,14 @@ int main(int argc, char* argv[]) {
     SendMessageA(state->hwnd_ac_list, WM_SETFONT, reinterpret_cast<WPARAM>(state->font_mono), TRUE);
 
     // Render / Update Button
-    HWND btn_render = CreateWindowExA(0, "BUTTON", "Update & Render Expression", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 15, 255, left_w, 32, hwnd_main, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_BTN_RENDER)), hinstance, nullptr);
+    HWND btn_render = CreateWindowExA(0, "BUTTON", "Update & Render Expression", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 15, 232, left_w, 30, hwnd_main, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_BTN_RENDER)), hinstance, nullptr);
     SendMessageA(btn_render, WM_SETFONT, reinterpret_cast<WPARAM>(state->font_ui), TRUE);
 
     // Mode selection Combo
-    HWND lbl_mode = CreateWindowExA(0, "STATIC", "Rendering Mode:", WS_CHILD | WS_VISIBLE, 15, 298, 120, 20, hwnd_main, nullptr, hinstance, nullptr);
+    HWND lbl_mode = CreateWindowExA(0, "STATIC", "Rendering Mode:", WS_CHILD | WS_VISIBLE, 15, 271, 120, 20, hwnd_main, nullptr, hinstance, nullptr);
     SendMessageA(lbl_mode, WM_SETFONT, reinterpret_cast<WPARAM>(state->font_ui), TRUE);
 
-    state->hwnd_combo_mode = CreateWindowExA(0, "COMBOBOX", "", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST | WS_VSCROLL, 145, 295, left_w - 130, 120, hwnd_main, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_COMBO_MODE)), hinstance, nullptr);
+    state->hwnd_combo_mode = CreateWindowExA(0, "COMBOBOX", "", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST | WS_VSCROLL, 145, 268, left_w - 130, 120, hwnd_main, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_COMBO_MODE)), hinstance, nullptr);
     SendMessageA(state->hwnd_combo_mode, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>("Auto (1D Curve / 2D Field)"));
     SendMessageA(state->hwnd_combo_mode, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>("1D Explicit Curve y = f(x)"));
     SendMessageA(state->hwnd_combo_mode, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>("2D Heatmap z = f(x, y)"));
@@ -1182,21 +1236,40 @@ int main(int argc, char* argv[]) {
     SendMessageA(state->hwnd_combo_mode, WM_SETFONT, reinterpret_cast<WPARAM>(state->font_ui), TRUE);
 
     // Preset Buttons Section
-    HWND lbl_presets = CreateWindowExA(0, "STATIC", "Sample Script Presets:", WS_CHILD | WS_VISIBLE, 15, 330, left_w, 20, hwnd_main, nullptr, hinstance, nullptr);
+    HWND lbl_presets = CreateWindowExA(0, "STATIC", "Sample Script Presets:", WS_CHILD | WS_VISIBLE, 15, 298, left_w, 18, hwnd_main, nullptr, hinstance, nullptr);
     SendMessageA(lbl_presets, WM_SETFONT, reinterpret_cast<WPARAM>(state->font_ui), TRUE);
 
-    HWND btn_p1 = CreateWindowExA(0, "BUTTON", "1. Spiral Waves (let/var)", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 15, 355, 195, 28, hwnd_main, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_BTN_PRESET1)), hinstance, nullptr);
-    HWND btn_p2 = CreateWindowExA(0, "BUTTON", "2. Calculus (diff_step)", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 220, 355, 195, 28, hwnd_main, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_BTN_PRESET2)), hinstance, nullptr);
-    HWND btn_p3 = CreateWindowExA(0, "BUTTON", "3. FFT Window (hann/wave)", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 15, 390, 195, 28, hwnd_main, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_BTN_PRESET3)), hinstance, nullptr);
-    HWND btn_p4 = CreateWindowExA(0, "BUTTON", "4. Implicit Flower f=0", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 220, 390, 195, 28, hwnd_main, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_BTN_PRESET4)), hinstance, nullptr);
+    HWND btn_p1 = CreateWindowExA(0, "BUTTON", "1. Spiral Waves (let/var)", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 15, 320, 195, 26, hwnd_main, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_BTN_PRESET1)), hinstance, nullptr);
+    HWND btn_p2 = CreateWindowExA(0, "BUTTON", "2. Calculus (diff_step)", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 220, 320, 195, 26, hwnd_main, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_BTN_PRESET2)), hinstance, nullptr);
+    HWND btn_p3 = CreateWindowExA(0, "BUTTON", "3. FFT Window (hann/wave)", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 15, 350, 195, 26, hwnd_main, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_BTN_PRESET3)), hinstance, nullptr);
+    HWND btn_p4 = CreateWindowExA(0, "BUTTON", "4. Implicit Flower f=0", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 220, 350, 195, 26, hwnd_main, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_BTN_PRESET4)), hinstance, nullptr);
     SendMessageA(btn_p1, WM_SETFONT, reinterpret_cast<WPARAM>(state->font_ui), TRUE);
     SendMessageA(btn_p2, WM_SETFONT, reinterpret_cast<WPARAM>(state->font_ui), TRUE);
     SendMessageA(btn_p3, WM_SETFONT, reinterpret_cast<WPARAM>(state->font_ui), TRUE);
     SendMessageA(btn_p4, WM_SETFONT, reinterpret_cast<WPARAM>(state->font_ui), TRUE);
 
     // Status / Diagnostic text
-    state->hwnd_status = CreateWindowExA(0, "STATIC", "Status: Initializing...", WS_CHILD | WS_VISIBLE, 15, 430, left_w, 55, hwnd_main, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_STATUS_TEXT)), hinstance, nullptr);
+    state->hwnd_status = CreateWindowExA(0, "STATIC", "Status: Initializing...", WS_CHILD | WS_VISIBLE, 15, 382, left_w, 46, hwnd_main, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_STATUS_TEXT)), hinstance, nullptr);
     SendMessageA(state->hwnd_status, WM_SETFONT, reinterpret_cast<WPARAM>(state->font_ui), TRUE);
+
+    // LaTeXLive Mathematical Notation Section
+    HWND lbl_latex = CreateWindowExA(0, "STATIC", "Standard LaTeXLive Formula:", WS_CHILD | WS_VISIBLE, 15, 434, 260, 20, hwnd_main, nullptr, hinstance, nullptr);
+    SendMessageA(lbl_latex, WM_SETFONT, reinterpret_cast<WPARAM>(state->font_ui), TRUE);
+
+    state->hwnd_btn_copy_latex = CreateWindowExA(0, "BUTTON", "Copy LaTeX", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 285, 430, 130, 26, hwnd_main, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_BTN_COPY_LATEX)), hinstance, nullptr);
+    SendMessageA(state->hwnd_btn_copy_latex, WM_SETFONT, reinterpret_cast<WPARAM>(state->font_ui), TRUE);
+
+    state->hwnd_latex_edit = CreateWindowExA(
+        WS_EX_CLIENTEDGE,
+        "EDIT",
+        "",
+        WS_CHILD | WS_VISIBLE | WS_VSCROLL | ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY,
+        15, 458, left_w, 76,
+        hwnd_main,
+        reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_EDIT_LATEX)),
+        hinstance, nullptr
+    );
+    SendMessageA(state->hwnd_latex_edit, WM_SETFONT, reinterpret_cast<WPARAM>(state->font_mono), TRUE);
 
     // Navigation & Interaction Tip box
     std::string tips = "Viewport Controls:\n"
@@ -1204,7 +1277,7 @@ int main(int argc, char* argv[]) {
                        "- Mouse Wheel: Zoom in / out at mouse cursor\n"
                        "- Double Click: Reset viewport to [-5, 5]\n"
                        "- Autocomplete: Type 'sin', 'diff' + Tab/Enter";
-    HWND lbl_tips = CreateWindowExA(0, "STATIC", tips.c_str(), WS_CHILD | WS_VISIBLE, 15, 500, left_w, 90, hwnd_main, nullptr, hinstance, nullptr);
+    HWND lbl_tips = CreateWindowExA(0, "STATIC", tips.c_str(), WS_CHILD | WS_VISIBLE, 15, 542, left_w, 85, hwnd_main, nullptr, hinstance, nullptr);
     SendMessageA(lbl_tips, WM_SETFONT, reinterpret_cast<WPARAM>(state->font_ui), TRUE);
 
     // Right Canvas Viewport
@@ -1371,11 +1444,26 @@ int main(int argc, char* argv[]) {
         TEST_ASSERT(state->is_valid_expr, "Navier-Stokes equation parsed successfully");
         TEST_ASSERT(state->plot_mode == PlotMode::Implicit2D, "Detected PlotMode::Implicit2D for equation");
 
+        // Verification 10: Verify LaTeXLive generation in GUI state and edit control
+        TEST_ASSERT(!state->current_latex.empty(), "LaTeX formula generated for Navier-Stokes equation");
+        TEST_ASSERT(state->current_latex.find("\\begin{aligned}") != std::string::npos, "LaTeX formula contains \\begin{aligned}");
+        TEST_ASSERT(state->current_latex.find("\\nu") != std::string::npos, "LaTeX formula contains \\nu");
+        TEST_ASSERT(state->current_latex.find("u_{0}") != std::string::npos, "LaTeX formula contains u_{0}");
+
+        // Test programmatic copy button command
+        SendMessageA(hwnd_main, WM_COMMAND, MAKEWPARAM(IDC_BTN_COPY_LATEX, BN_CLICKED), 0);
+
+        // Verification 11: Test 1/x + 1/y = 0 rational equation in editor
+        SetWindowTextA(state->hwnd_edit, "1/x + 1/y = 0");
+        apply_syntax_highlighting(state.get());
+        update_expression_from_edit(state.get());
+        TEST_ASSERT(state->current_latex.find("\\frac{1}{x} + \\frac{1}{y} = 0") != std::string::npos, "Rational equation converted to LaTeX \\frac{1}{x} + \\frac{1}{y} = 0");
+
         // Trigger render
         state->renderer->render(0.0);
         state->renderer->present();
 
-        std::cout << "All split-window interactive GUI, syntax highlighting & autocomplete assertions PASSED!\n";
+        std::cout << "All split-window interactive GUI, syntax highlighting, LaTeXLive & autocomplete assertions PASSED!\n";
     }
 
     // Cleanup Win32 resources

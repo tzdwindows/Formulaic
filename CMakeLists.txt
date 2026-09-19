@@ -91,6 +91,7 @@ set(FORMULAIC_PUBLIC_HEADERS
     include/Formulaic/parser/ast.hpp
     include/Formulaic/parser/bytecode.hpp
     include/Formulaic/parser/expression.hpp
+    include/Formulaic/parser/latex_converter.hpp
     include/Formulaic/render/color.hpp
     include/Formulaic/render/viewport.hpp
     include/Formulaic/render/framebuffer.hpp
@@ -119,6 +120,7 @@ set(FORMULAIC_SOURCES
     src/parser/bytecode_vm.hpp
     src/parser/bytecode_vm.cpp
     src/parser/expression.cpp
+    src/parser/latex_converter.cpp
     src/math/calculus.cpp
     src/math/fft.cpp
     src/math/bigint.cpp

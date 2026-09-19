@@ -42,3 +42,6 @@ add_test(NAME test_editor_window COMMAND test_editor_window --automated)
 
 # 6. GNU Multiple Precision (GMP) BigInt, Rational & Evaluator Test
 add_formulaic_test(test_gmp test_gmp.cpp ${TEST_LIB_TARGET})
+
+# 7. Standard LaTeXLive Mathematical Notation Converter Test
+add_formulaic_test(test_latex test_latex.cpp ${TEST_LIB_TARGET})

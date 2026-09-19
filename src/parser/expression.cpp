@@ -154,4 +154,8 @@ std::vector<std::string> Expression::referenced_variables() const {
     return result;
 }
 
+Result<std::string> Expression::to_latex(const LatexFormatOptions& options) const {
+    return LatexConverter::convert(source_, options, program_.variable_names);
+}
+
 } // namespace formulaic

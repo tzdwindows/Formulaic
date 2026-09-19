@@ -124,6 +124,16 @@ readme_content = """# Formulaic
 - `CoordinateTransformHook`：空间坐标投影变换（如极坐标、对数坐标、球面投影）。
 - `PixelShaderHook`：逐像素着色器钩子（支持动态梯度色、光晕与程序纹理混合）。
 
+### 6. LaTeXLive 标准数学公式转换 (LaTeXLive Converter)
+- **标准 TeX Live 兼容**：将 Formulaic 表达式、隐式方程（如 `1/x + 1/y = 0`）与变量脚本实时转换为工业级标准的 LaTeXLive 数学代码。
+- **美观排版与符号映射**：
+  - 分式自动排版为 `\frac{分子}{分母}`，消除外层冗余圆括号。
+  - 自动翻译希腊字母（`alpha` -> `\alpha`, `theta` -> `\theta`, `nu` -> `\nu` 等）与数学常数（`\pi`, `\infty`）。
+  - 下标自动规范化（`u0` -> `u_{0}`, `d2u_dx2` -> `\text{d2u}_{dx2}`, `lap_u` -> `\text{lap}_{u}`）。
+  - 函数幂次专业表示（如 `\sin^{2}\left(x\right)`、`\sqrt{...}`、`\left| ... \right|`）。
+  - 多行变量赋值脚本自动生成 `\begin{aligned} ... \end{aligned}` 对齐环境，各行等号与最终方程精确纵向对齐。
+- **GUI 交互集成**：在 `test_editor_window.exe` 左侧操作面板提供实时的标准 LaTeX 预览与 "Copy LaTeX" 一键剪贴板复制功能。
+
 ---
 
 ## 系统架构与渲染管线

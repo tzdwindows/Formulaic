@@ -3,6 +3,7 @@
 #include <Formulaic/core/error.hpp>
 #include <Formulaic/core/export.hpp>
 #include <Formulaic/parser/bytecode.hpp>
+#include <Formulaic/parser/latex_converter.hpp>
 #include <span>
 #include <string>
 #include <string_view>
@@ -57,6 +58,9 @@ public:
     [[nodiscard]] double differentiate(double x, double h = 1e-5) const noexcept;
     [[nodiscard]] double integrate(double a, double b, size_t steps = 1000) const noexcept;
     [[nodiscard]] std::vector<double> compute_spectrum(double t_start, double t_end, size_t sample_count) const;
+
+    // Convert current expression to standard LaTeXLive formula
+    [[nodiscard]] Result<std::string> to_latex(const LatexFormatOptions& options = {}) const;
 
     [[nodiscard]] const std::string& source() const noexcept { return source_; }
     [[nodiscard]] const std::vector<std::string>& variables() const noexcept { return program_.variable_names; }
