@@ -785,6 +785,315 @@ void RasterEngine::plot_scalar_field(
     }
 }
 
+void RasterEngine::plot_surface_3d(
+    FrameBuffer& fb,
+    const Expression& expr,
+    const Surface3DStyle& style,
+    double time_t,
+    const PipelineHooks* hooks
+) const {
+    const int w = fb.width();
+    const int h = fb.height();
+    if (w <= 0 || h <= 0 || !expr.is_valid()) return;
+
+    const int nx = std::clamp(style.grid_resolution_x, 10, 150);
+    const int ny = std::clamp(style.grid_resolution_y, 10, 150);
+
+    const double x_min = style.x_min;
+    const double x_max = style.x_max;
+    const double y_min = style.y_min;
+    const double y_max = style.y_max;
+    const double dx = (nx > 1) ? (x_max - x_min) / (nx - 1) : 0.0;
+    const double dy = (ny > 1) ? (y_max - y_min) / (ny - 1) : 0.0;
+
+    auto eval_safe = [&](double x, double y) -> double {
+        if (hooks && hooks->has_coord_transform_hook()) {
+            Point2D pt = hooks->transform_coordinate({x, y}, Viewport());
+            x = pt.x;
+            y = pt.y;
+        }
+        double v = expr.eval(x, y, time_t);
+        if (std::isnan(v) || std::isinf(v)) {
+            // Nudge singularity (e.g. Sombrero sinc at origin r=0)
+            const double eps = 1e-6;
+            v = expr.eval(x + eps, y + eps, time_t);
+            if (std::isnan(v) || std::isinf(v)) {
+                v = expr.eval(x - eps, y + eps, time_t);
+            }
+        }
+        return v;
+    };
+
+    // 1. Grid evaluation
+    std::vector<double> z_grid(static_cast<size_t>(nx) * ny);
+    std::vector<bool> valid_grid(static_cast<size_t>(nx) * ny, false);
+
+    double actual_z_min = 1e30;
+    double actual_z_max = -1e30;
+    int valid_count = 0;
+
+    for (int j = 0; j < ny; ++j) {
+        const double y = y_min + j * dy;
+        for (int i = 0; i < nx; ++i) {
+            const double x = x_min + i * dx;
+            const size_t idx = static_cast<size_t>(j) * nx + i;
+            double z = eval_safe(x, y);
+            if (!std::isnan(z) && !std::isinf(z)) {
+                z_grid[idx] = z;
+                valid_grid[idx] = true;
+                actual_z_min = std::min(actual_z_min, z);
+                actual_z_max = std::max(actual_z_max, z);
+                valid_count++;
+            }
+        }
+    }
+
+    if (valid_count == 0) return;
+
+    double z_min = style.z_min;
+    double z_max = style.z_max;
+    if (style.auto_z_range) {
+        z_min = actual_z_min;
+        z_max = actual_z_max;
+        if (std::abs(z_max - z_min) < 1e-5) {
+            z_min -= 1.0;
+            z_max += 1.0;
+        }
+    }
+    const double z_range = (z_max != z_min) ? (z_max - z_min) : 1.0;
+
+    // 2. Camera projection transform setup
+    constexpr double kPi = 3.14159265358979323846;
+    const double phi = style.azimuth_deg * (kPi / 180.0);
+    const double theta = style.elevation_deg * (kPi / 180.0);
+
+    const double cos_phi = std::cos(phi), sin_phi = std::sin(phi);
+    const double cos_theta = std::cos(theta), sin_theta = std::sin(theta);
+
+    const double x_mid = 0.5 * (x_min + x_max);
+    const double x_half = 0.5 * (x_max - x_min);
+    const double y_mid = 0.5 * (y_min + y_max);
+    const double y_half = 0.5 * (y_max - y_min);
+    const double z_mid = 0.5 * (z_min + z_max);
+    const double z_half = 0.5 * (z_max - z_min);
+
+    const double inv_xh = (x_half > 1e-6) ? (1.0 / x_half) : 1.0;
+    const double inv_yh = (y_half > 1e-6) ? (1.0 / y_half) : 1.0;
+    const double inv_zh = (z_half > 1e-6) ? (1.0 / z_half) : 1.0;
+
+    const double cam_dist = 3.4;
+    const double scale_base = std::min(w, h) * 0.38 * style.zoom;
+    const double cx = w * 0.5;
+    const double cy = h * 0.5;
+
+    struct ProjVertex {
+        Point2D screen;
+        double depth{0.0};
+        Point3D norm_pos; // in [-1, 1]^3
+        double orig_z{0.0};
+        bool valid{false};
+    };
+
+    auto project_point = [&](double x, double y, double z) -> ProjVertex {
+        ProjVertex pv;
+        pv.orig_z = z;
+        pv.norm_pos.x = (x - x_mid) * inv_xh;
+        pv.norm_pos.y = (y - y_mid) * inv_yh;
+        pv.norm_pos.z = (z - z_mid) * inv_zh;
+
+        // Yaw around Z
+        const double x1 = pv.norm_pos.x * cos_phi - pv.norm_pos.y * sin_phi;
+        const double y1 = pv.norm_pos.x * sin_phi + pv.norm_pos.y * cos_phi;
+        const double z1 = pv.norm_pos.z;
+
+        // Pitch by elevation theta
+        const double x_cam = x1;
+        const double y_cam = z1 * cos_theta - y1 * sin_theta;
+        const double z_cam = z1 * sin_theta + y1 * cos_theta;
+
+        const double w_dist = cam_dist - z_cam;
+        if (w_dist <= 0.1) {
+            pv.valid = false;
+            return pv;
+        }
+
+        const double factor = (cam_dist / w_dist) * scale_base;
+        pv.screen.x = cx + x_cam * factor;
+        pv.screen.y = cy - y_cam * factor;
+        pv.depth = z_cam;
+        pv.valid = true;
+        return pv;
+    };
+
+    // Pre-project all grid vertices
+    std::vector<ProjVertex> proj_grid(static_cast<size_t>(nx) * ny);
+    for (int j = 0; j < ny; ++j) {
+        const double y = y_min + j * dy;
+        for (int i = 0; i < nx; ++i) {
+            const size_t idx = static_cast<size_t>(j) * nx + i;
+            if (valid_grid[idx]) {
+                const double x = x_min + i * dx;
+                proj_grid[idx] = project_point(x, y, z_grid[idx]);
+            }
+        }
+    }
+
+    // 3. Render 3D Bounding Box & Coordinate Grid
+    if (style.show_box_axes) {
+        Point3D box_corners[8] = {
+            {x_min, y_min, z_min}, {x_max, y_min, z_min},
+            {x_max, y_max, z_min}, {x_min, y_max, z_min},
+            {x_min, y_min, z_max}, {x_max, y_min, z_max},
+            {x_max, y_max, z_max}, {x_min, y_max, z_max}
+        };
+        ProjVertex box_pv[8];
+        for (int k = 0; k < 8; ++k) {
+            box_pv[k] = project_point(box_corners[k].x, box_corners[k].y, box_corners[k].z);
+        }
+
+        int box_edges[12][2] = {
+            {0, 1}, {1, 2}, {2, 3}, {3, 0},
+            {4, 5}, {5, 6}, {6, 7}, {7, 4},
+            {0, 4}, {1, 5}, {2, 6}, {3, 7}
+        };
+
+        // Draw rear/floor grid & box axes
+        for (int e = 0; e < 12; ++e) {
+            int a = box_edges[e][0], b = box_edges[e][1];
+            if (box_pv[a].valid && box_pv[b].valid) {
+                double avg_d = (box_pv[a].depth + box_pv[b].depth) * 0.5;
+                Color edge_col = (avg_d < 0.0) ? style.axis_color.with_alpha(80) : style.axis_color.with_alpha(180);
+                fb.draw_line_aa(box_pv[a].screen.x, box_pv[a].screen.y, box_pv[b].screen.x, box_pv[b].screen.y, edge_col, 1.2);
+            }
+        }
+
+        // Draw axis labels
+        if (box_pv[1].valid) fb.draw_text(static_cast<int>(box_pv[1].screen.x) + 4, static_cast<int>(box_pv[1].screen.y) + 4, "+X", Color::NeonPink);
+        if (box_pv[3].valid) fb.draw_text(static_cast<int>(box_pv[3].screen.x) + 4, static_cast<int>(box_pv[3].screen.y) + 4, "+Y", Color::NeonGreen);
+        if (box_pv[4].valid) fb.draw_text(static_cast<int>(box_pv[4].screen.x) + 4, static_cast<int>(box_pv[4].screen.y) - 14, "+Z", Color::NeonBlue);
+    }
+
+    // 4. Build surface triangles
+    struct SurfaceTriangle {
+        ProjVertex v0, v1, v2;
+        double avg_depth{0.0};
+        double avg_z{0.0};
+        Point3D normal;
+    };
+
+    std::vector<SurfaceTriangle> triangles;
+    triangles.reserve(static_cast<size_t>(nx - 1) * (ny - 1) * 2);
+
+    for (int j = 0; j < ny - 1; ++j) {
+        for (int i = 0; i < nx - 1; ++i) {
+            const size_t idx0 = static_cast<size_t>(j) * nx + i;
+            const size_t idx1 = static_cast<size_t>(j) * nx + (i + 1);
+            const size_t idx2 = static_cast<size_t>(j + 1) * nx + (i + 1);
+            const size_t idx3 = static_cast<size_t>(j + 1) * nx + i;
+
+            const auto& p0 = proj_grid[idx0];
+            const auto& p1 = proj_grid[idx1];
+            const auto& p2 = proj_grid[idx2];
+            const auto& p3 = proj_grid[idx3];
+
+            auto add_tri = [&](const ProjVertex& a, const ProjVertex& b, const ProjVertex& c) {
+                if (!a.valid || !b.valid || !c.valid) return;
+
+                // Normal vector in 3D normalized coords
+                Point3D ab{b.norm_pos.x - a.norm_pos.x, b.norm_pos.y - a.norm_pos.y, b.norm_pos.z - a.norm_pos.z};
+                Point3D ac{c.norm_pos.x - a.norm_pos.x, c.norm_pos.y - a.norm_pos.y, c.norm_pos.z - a.norm_pos.z};
+                Point3D norm{
+                    ab.y * ac.z - ab.z * ac.y,
+                    ab.z * ac.x - ab.x * ac.z,
+                    ab.x * ac.y - ab.y * ac.x
+                };
+                double len = std::sqrt(norm.x * norm.x + norm.y * norm.y + norm.z * norm.z);
+                if (len > 1e-9) {
+                    norm.x = norm.x / len;
+                    norm.y = norm.y / len;
+                    norm.z = norm.z / len;
+                }
+
+                SurfaceTriangle tri;
+                tri.v0 = a;
+                tri.v1 = b;
+                tri.v2 = c;
+                tri.avg_depth = (a.depth + b.depth + c.depth) / 3.0;
+                tri.avg_z = (a.orig_z + b.orig_z + c.orig_z) / 3.0;
+                tri.normal = norm;
+                triangles.push_back(tri);
+            };
+
+            add_tri(p0, p1, p2);
+            add_tri(p0, p2, p3);
+        }
+    }
+
+    // 5. Depth sort: Painter's Algorithm (furthest triangles drawn first)
+    std::sort(triangles.begin(), triangles.end(), [](const SurfaceTriangle& t1, const SurfaceTriangle& t2) {
+        return t1.avg_depth < t2.avg_depth;
+    });
+
+    // Directional light vector
+    const Point3D light_dir{0.35, -0.65, 0.90};
+    const double light_len = std::sqrt(light_dir.x * light_dir.x + light_dir.y * light_dir.y + light_dir.z * light_dir.z);
+    const Point3D L{light_dir.x / light_len, light_dir.y / light_len, light_dir.z / light_len};
+
+    // 6. Rasterize triangles
+    for (const auto& tri : triangles) {
+        double t = std::clamp((tri.avg_z - z_min) / z_range, 0.0, 1.0);
+        Color base_c = sample_colormap(style.colormap, t);
+
+        if (hooks && hooks->has_pixel_shader_hook()) {
+            base_c = hooks->shade_pixel(0.0, 0.0, tri.avg_z, base_c, time_t);
+        }
+
+        // Diffuse lighting calculation
+        double dot = std::abs(tri.normal.x * L.x + tri.normal.y * L.y + tri.normal.z * L.z);
+        double diffuse = 0.52 + 0.48 * dot;
+
+        int r = std::clamp(static_cast<int>(base_c.r * diffuse), 0, 255);
+        int g = std::clamp(static_cast<int>(base_c.g * diffuse), 0, 255);
+        int b = std::clamp(static_cast<int>(base_c.b * diffuse), 0, 255);
+        Color shaded_c(static_cast<uint8_t>(r), static_cast<uint8_t>(g), static_cast<uint8_t>(b), base_c.a);
+
+        if (style.show_mesh_faces) {
+            fb.fill_triangle(tri.v0.screen.x, tri.v0.screen.y,
+                             tri.v1.screen.x, tri.v1.screen.y,
+                             tri.v2.screen.x, tri.v2.screen.y,
+                             shaded_c);
+        }
+
+        if (style.show_wireframe) {
+            Color wc = style.wireframe_color;
+            fb.draw_line_aa(tri.v0.screen.x, tri.v0.screen.y, tri.v1.screen.x, tri.v1.screen.y, wc, 1.0);
+            fb.draw_line_aa(tri.v1.screen.x, tri.v1.screen.y, tri.v2.screen.x, tri.v2.screen.y, wc, 1.0);
+            fb.draw_line_aa(tri.v2.screen.x, tri.v2.screen.y, tri.v0.screen.x, tri.v0.screen.y, wc, 1.0);
+        }
+    }
+
+    // 7. Interactive 3D Surface Information Badge
+    std::ostringstream hud_ss;
+    hud_ss << std::fixed << std::setprecision(1);
+    hud_ss << "3D Surface | Azimuth: " << style.azimuth_deg << "`  Elev: " << style.elevation_deg << "`  Zoom: " << style.zoom << "x";
+    
+    std::ostringstream z_ss;
+    z_ss << std::fixed << std::setprecision(3);
+    z_ss << "Z: [" << z_min << ", " << z_max << "] | Grid: " << nx << "x" << ny;
+
+    int badge_w = 340;
+    int badge_h = 56;
+    int bx = w - badge_w - 20;
+    int by = 20;
+    if (bx > 0 && by > 0) {
+        fb.fill_rounded_rect(bx, by, badge_w, badge_h, 6, Color(18, 20, 28, 215));
+        fb.draw_rounded_rect(bx, by, badge_w, badge_h, 6, Color(60, 70, 95, 230), 1);
+        fb.draw_text(bx + 12, by + 8, hud_ss.str(), Color::White);
+        fb.draw_text(bx + 12, by + 23, z_ss.str(), Color::LightGray);
+        fb.draw_text(bx + 12, by + 38, "Drag: Rotate View  |  Wheel: Zoom In/Out", Color(140, 160, 200));
+    }
+}
+
 HitTestResult RasterEngine::hit_test_explicit(
     const Viewport& vp,
     const Expression& expr,
@@ -915,6 +1224,16 @@ void RasterEngine::plot_latex(
     }
     const auto& expr = expr_res.value();
     std::string s(latex_text);
+
+    // Check if equation defines a 3D surface: z = f(x, y)
+    bool is_z_surface = (s.starts_with("z =") || s.starts_with("z=") ||
+                         s.find("z = ") != std::string::npos || s.find("z=") != std::string::npos);
+    if (is_z_surface) {
+        Surface3DStyle s3d;
+        plot_surface_3d(fb, expr, s3d, time_t, hooks);
+        return;
+    }
+
     bool is_implicit = (s.find('=') != std::string::npos && s.find("y = ") != 0);
     if (is_implicit) {
         plot_implicit(fb, vp, expr, color, line_thickness, time_t, hooks);

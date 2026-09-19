@@ -22,6 +22,28 @@ struct FORMULAIC_API GridStyle {
     int minor_divisions{5};
 };
 
+struct FORMULAIC_API Surface3DStyle {
+    double azimuth_deg{45.0};      // Yaw rotation angle around Z axis in degrees
+    double elevation_deg{30.0};    // Pitch elevation angle above XY plane in degrees
+    double zoom{1.0};              // Camera zoom multiplier
+    int grid_resolution_x{55};     // Mesh sample density in X
+    int grid_resolution_y{55};     // Mesh sample density in Y
+    double x_min{-5.0};
+    double x_max{5.0};
+    double y_min{-5.0};
+    double y_max{5.0};
+    double z_min{-1.0};
+    double z_max{1.0};
+    bool auto_z_range{true};       // Dynamically adjust z_min and z_max from sampled values
+    bool show_wireframe{true};     // Render polygon wireframe grid lines
+    bool show_mesh_faces{true};    // Render filled shaded polygons
+    bool show_box_axes{true};      // Render 3D coordinate bounding box & axis lines
+    ColormapType colormap{ColormapType::Viridis};
+    Color wireframe_color{Color(30, 35, 50, 160)};
+    Color axis_color{Color(130, 140, 165, 220)};
+    Color text_color{Color::LightGray};
+};
+
 struct HitTestResult {
     bool hit{false};
     Point2D world_pos{0.0, 0.0};
@@ -101,6 +123,15 @@ public:
         ColormapType colormap = ColormapType::Viridis,
         double z_min = -1.0,
         double z_max = 1.0,
+        double time_t = 0.0,
+        const PipelineHooks* hooks = nullptr
+    ) const;
+
+    // Plots a 3D surface z = f(x, y, t) with projection, depth sorting, shading, and bounding box
+    void plot_surface_3d(
+        FrameBuffer& fb,
+        const Expression& expr,
+        const Surface3DStyle& style = Surface3DStyle{},
         double time_t = 0.0,
         const PipelineHooks* hooks = nullptr
     ) const;

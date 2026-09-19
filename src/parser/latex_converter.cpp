@@ -1202,7 +1202,12 @@ Result<std::string> LatexConverter::to_script(std::string_view latex_text) {
         }
     }
 
-    std::string result_script;
+    struct ParsedEq {
+        std::string lhs;
+        std::string rhs;
+        bool is_eq{false};
+    };
+    std::vector<ParsedEq> parsed_eqs;
     for (size_t l_idx = 0; l_idx < raw_lines.size(); ++l_idx) {
         std::string line = raw_lines[l_idx];
         size_t amp_eq = line.find("&=");
@@ -1230,6 +1235,113 @@ Result<std::string> LatexConverter::to_script(std::string_view latex_text) {
             while (!lhs_conv.empty() && lhs_conv.front() == ' ') lhs_conv.erase(0, 1);
             while (!rhs_conv.empty() && rhs_conv.back() == ' ') rhs_conv.pop_back();
             while (!rhs_conv.empty() && rhs_conv.front() == ' ') rhs_conv.erase(0, 1);
+            parsed_eqs.push_back({std::move(lhs_conv), std::move(rhs_conv), true});
+        } else {
+            std::string conv = convert_latex_expr(line);
+            while (!conv.empty() && conv.back() == ' ') conv.pop_back();
+            while (!conv.empty() && conv.front() == ' ') conv.erase(0, 1);
+            parsed_eqs.push_back({"", std::move(conv), false});
+        }
+    }
+
+    // Check for 2D parametric / polar system: { x = ... , y = ... }
+    if (parsed_eqs.size() == 2 && parsed_eqs[0].is_eq && parsed_eqs[1].is_eq) {
+        std::string rhs_x, rhs_y;
+        bool is_xy_system = false;
+        if (parsed_eqs[0].lhs == "x" && parsed_eqs[1].lhs == "y") {
+            rhs_x = parsed_eqs[0].rhs;
+            rhs_y = parsed_eqs[1].rhs;
+            is_xy_system = true;
+        } else if (parsed_eqs[0].lhs == "y" && parsed_eqs[1].lhs == "x") {
+            rhs_x = parsed_eqs[1].rhs;
+            rhs_y = parsed_eqs[0].rhs;
+            is_xy_system = true;
+        }
+
+        if (is_xy_system) {
+            std::vector<std::string> angles = {"theta", "t", "phi"};
+            std::string radial_expr;
+            std::string angle_name;
+            bool is_polar = false;
+
+            for (const auto& ang : angles) {
+                std::string c_suff = "* cos(" + ang + ")";
+                std::string s_suff = "* sin(" + ang + ")";
+                if (rhs_x.size() > c_suff.size() && rhs_y.size() > s_suff.size()) {
+                    if (rhs_x.ends_with(c_suff) && rhs_y.ends_with(s_suff)) {
+                        std::string rx = rhs_x.substr(0, rhs_x.size() - c_suff.size());
+                        std::string ry = rhs_y.substr(0, rhs_y.size() - s_suff.size());
+                        while (!rx.empty() && (rx.back() == ' ' || rx.back() == '*')) rx.pop_back();
+                        while (!ry.empty() && (ry.back() == ' ' || ry.back() == '*')) ry.pop_back();
+                        if (!rx.empty() && rx == ry) {
+                            radial_expr = rx;
+                            angle_name = ang;
+                            is_polar = true;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            auto find_free_params = [](std::string_view expr, const std::unordered_set<std::string>& excluded) -> std::vector<std::string> {
+                std::vector<std::string> res;
+                std::unordered_set<std::string> seen;
+                size_t idx = 0;
+                while (idx < expr.size()) {
+                    if (std::isalpha(static_cast<unsigned char>(expr[idx])) || expr[idx] == '_') {
+                        size_t st = idx;
+                        while (idx < expr.size() && (std::isalnum(static_cast<unsigned char>(expr[idx])) || expr[idx] == '_')) ++idx;
+                        std::string id(expr.substr(st, idx - st));
+                        if (excluded.count(id)) continue;
+                        static const std::unordered_set<std::string> kBuiltins = {
+                            "sin", "cos", "tan", "asin", "acos", "atan", "atan2",
+                            "sinh", "cosh", "tanh", "exp", "ln", "log", "sqrt", "cbrt", "abs",
+                            "hypot", "min", "max", "clamp", "floor", "ceil", "round",
+                            "pi", "e", "tau", "phi", "euler", "inf"
+                        };
+                        if (kBuiltins.count(id)) continue;
+                        if (seen.insert(id).second) {
+                            res.push_back(id);
+                        }
+                    } else {
+                        ++idx;
+                    }
+                }
+                return res;
+            };
+
+            if (is_polar) {
+                std::string script;
+                auto params = find_free_params(radial_expr, {angle_name, "r", "x", "y"});
+                for (const auto& p : params) {
+                    script += "let " + p + " = 3.0;\n";
+                }
+                script += "let r = hypot(x, y);\n";
+                script += "let " + angle_name + " = atan2(y, x);\n";
+                script += "r - " + radial_expr + " = 0";
+                return script;
+            } else {
+                std::string script;
+                auto params = find_free_params(rhs_x + " " + rhs_y, {"t", "theta", "phi", "x", "y"});
+                for (const auto& p : params) {
+                    script += "let " + p + " = 1.0;\n";
+                }
+                if (rhs_x.find("theta") != std::string::npos || rhs_y.find("theta") != std::string::npos) {
+                    script += "let theta = t;\n";
+                }
+                script += "let x = " + rhs_x + ";\n";
+                script += "let y = " + rhs_y + ";";
+                return script;
+            }
+        }
+    }
+
+    std::string result_script;
+    for (size_t l_idx = 0; l_idx < parsed_eqs.size(); ++l_idx) {
+        const auto& item = parsed_eqs[l_idx];
+        if (item.is_eq) {
+            const std::string& lhs_conv = item.lhs;
+            const std::string& rhs_conv = item.rhs;
 
             if (lhs_conv == "f(x, y)" || lhs_conv == "f(x)") {
                 result_script += rhs_conv + ";\n";
@@ -1237,27 +1349,24 @@ Result<std::string> LatexConverter::to_script(std::string_view latex_text) {
             }
 
             bool is_simple_var = is_simple_atom(lhs_conv);
-            if (is_simple_var && raw_lines.size() > 1 && l_idx + 1 < raw_lines.size()) {
+            if (is_simple_var && parsed_eqs.size() > 1 && l_idx + 1 < parsed_eqs.size()) {
                 result_script += "let " + lhs_conv + " = " + rhs_conv + ";\n";
-            } else if (is_simple_var && raw_lines.size() > 1 && l_idx + 1 == raw_lines.size()) {
+            } else if (is_simple_var && parsed_eqs.size() > 1 && l_idx + 1 == parsed_eqs.size()) {
                 result_script += "let " + lhs_conv + " = " + rhs_conv + ";\n";
-            } else if (raw_lines.size() > 1 && !is_simple_var) {
+            } else if (parsed_eqs.size() > 1 && !is_simple_var) {
                 result_script += lhs_conv + " = " + rhs_conv + "\n";
             } else {
-                if (lhs_conv == "y" && raw_lines.size() == 1) {
+                if (lhs_conv == "y" && parsed_eqs.size() == 1) {
                     result_script += rhs_conv;
                 } else {
                     result_script += lhs_conv + " = " + rhs_conv;
                 }
             }
         } else {
-            std::string conv = convert_latex_expr(line);
-            while (!conv.empty() && conv.back() == ' ') conv.pop_back();
-            while (!conv.empty() && conv.front() == ' ') conv.erase(0, 1);
-            if (raw_lines.size() > 1) {
-                result_script += conv + ";\n";
+            if (parsed_eqs.size() > 1) {
+                result_script += item.rhs + ";\n";
             } else {
-                result_script += conv;
+                result_script += item.rhs;
             }
         }
     }

@@ -428,7 +428,13 @@ std::string BigInt::to_string(int base) const {
     char* str = mpz_get_str(nullptr, base, val_);
     if (!str) return "0";
     std::string s(str);
-    free(str);
+    void (*free_func)(void*, size_t) = nullptr;
+    mp_get_memory_functions(nullptr, nullptr, &free_func);
+    if (free_func) {
+        free_func(str, s.size() + 1);
+    } else {
+        free(str);
+    }
     return s;
 #else
     return std::to_string(fallback_val_);
@@ -440,7 +446,13 @@ int64_t BigInt::to_int64() const noexcept {
     char* str = mpz_get_str(nullptr, 10, val_);
     if (!str) return 0;
     int64_t res = std::strtoll(str, nullptr, 10);
-    free(str);
+    void (*free_func)(void*, size_t) = nullptr;
+    mp_get_memory_functions(nullptr, nullptr, &free_func);
+    if (free_func) {
+        free_func(str, std::strlen(str) + 1);
+    } else {
+        free(str);
+    }
     return res;
 #else
     return fallback_val_;

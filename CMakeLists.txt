@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(Formulaic VERSION 1.0.0 LANGUAGES C CXX)
+project(Formulaic VERSION 1.2.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -27,11 +27,38 @@ option(FORMULAIC_ENABLE_GMP "Enable GNU Multiple Precision Arithmetic Library (G
 # -----------------------------------------------------------------------------
 if(FORMULAIC_ENABLE_GMP)
     include(SelectLibraryConfigurations)
+    if(CMAKE_SIZEOF_VOID_P EQUAL 8)
+        set(ARCH_VCPKG_HINTS
+            E:/vcpkg/installed/x64-windows-static/include
+            E:/vcpkg/installed/x64-windows/include
+        )
+        set(ARCH_VCPKG_LIB_HINTS
+            E:/vcpkg/installed/x64-windows-static/lib
+            E:/vcpkg/installed/x64-windows/lib
+        )
+        set(ARCH_VCPKG_DEBUG_LIB_HINTS
+            E:/vcpkg/installed/x64-windows-static/debug/lib
+            E:/vcpkg/installed/x64-windows/debug/lib
+        )
+    else()
+        set(ARCH_VCPKG_HINTS
+            E:/vcpkg/installed/x86-windows-static/include
+            E:/vcpkg/installed/x86-windows/include
+        )
+        set(ARCH_VCPKG_LIB_HINTS
+            E:/vcpkg/installed/x86-windows-static/lib
+            E:/vcpkg/installed/x86-windows/lib
+        )
+        set(ARCH_VCPKG_DEBUG_LIB_HINTS
+            E:/vcpkg/installed/x86-windows-static/debug/lib
+            E:/vcpkg/installed/x86-windows/debug/lib
+        )
+    endif()
+
     find_path(GMP_INCLUDE_DIR NAMES gmp.h
         HINTS
         $ENV{VCPKG_ROOT}/installed/$ENV{VCPKG_DEFAULT_TRIPLET}/include
-        E:/vcpkg/installed/x64-windows-static/include
-        E:/vcpkg/installed/x64-windows/include
+        ${ARCH_VCPKG_HINTS}
         /usr/include
         /usr/local/include
         /opt/homebrew/include
@@ -39,8 +66,7 @@ if(FORMULAIC_ENABLE_GMP)
     find_library(GMP_LIBRARY_RELEASE NAMES gmp gmp-10 libgmp
         PATHS
         $ENV{VCPKG_ROOT}/installed/$ENV{VCPKG_DEFAULT_TRIPLET}/lib
-        E:/vcpkg/installed/x64-windows-static/lib
-        E:/vcpkg/installed/x64-windows/lib
+        ${ARCH_VCPKG_LIB_HINTS}
         /usr/lib
         /usr/local/lib
         /opt/homebrew/lib
@@ -49,8 +75,7 @@ if(FORMULAIC_ENABLE_GMP)
     find_library(GMP_LIBRARY_DEBUG NAMES gmp gmp-10 libgmp
         PATHS
         $ENV{VCPKG_ROOT}/installed/$ENV{VCPKG_DEFAULT_TRIPLET}/debug/lib
-        E:/vcpkg/installed/x64-windows-static/debug/lib
-        E:/vcpkg/installed/x64-windows/debug/lib
+        ${ARCH_VCPKG_DEBUG_LIB_HINTS}
         NO_DEFAULT_PATH
     )
     select_library_configurations(GMP)
@@ -160,7 +185,7 @@ if(FORMULAIC_BUILD_STATIC)
         endif()
     endif()
     if(WIN32)
-        target_link_libraries(Formulaic_static PUBLIC gdi32 user32)
+        target_link_libraries(Formulaic_static PUBLIC gdi32 user32 gdiplus)
     endif()
     set_target_properties(Formulaic_static PROPERTIES
         OUTPUT_NAME "Formulaic_static"
@@ -191,7 +216,7 @@ if(FORMULAIC_BUILD_SHARED)
         endif()
     endif()
     if(WIN32)
-        target_link_libraries(Formulaic_shared PUBLIC gdi32 user32)
+        target_link_libraries(Formulaic_shared PUBLIC gdi32 user32 gdiplus)
     endif()
     set_target_properties(Formulaic_shared PROPERTIES
         OUTPUT_NAME "Formulaic"

@@ -480,6 +480,49 @@ void FrameBuffer::draw_text(int x, int y, std::string_view text, Color color, in
     }
 }
 
+void FrameBuffer::fill_triangle(double x0, double y0, double x1, double y1, double x2, double y2, Color color) noexcept {
+    if (color.a == 0) return;
+
+    int min_x = std::max(0, static_cast<int>(std::floor(std::min({x0, x1, x2}))));
+    int max_x = std::min(width_ - 1, static_cast<int>(std::ceil(std::max({x0, x1, x2}))));
+    int min_y = std::max(0, static_cast<int>(std::floor(std::min({y0, y1, y2}))));
+    int max_y = std::min(height_ - 1, static_cast<int>(std::ceil(std::max({y0, y1, y2}))));
+    if (min_x > max_x || min_y > max_y) return;
+
+    auto orient = [](double ax, double ay, double bx, double by, double cx, double cy) -> double {
+        return (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
+    };
+
+    double area = orient(x0, y0, x1, y1, x2, y2);
+    if (std::abs(area) < 1e-6) return;
+
+    if (area < 0.0) {
+        std::swap(x1, x2);
+        std::swap(y1, y2);
+    }
+
+    const double dx01 = x1 - x0, dy01 = y1 - y0;
+    const double dx12 = x2 - x1, dy12 = y2 - y1;
+    const double dx20 = x0 - x2, dy20 = y0 - y2;
+
+    for (int y = min_y; y <= max_y; ++y) {
+        const double py = y + 0.5;
+        for (int x = min_x; x <= max_x; ++x) {
+            const double px = x + 0.5;
+            double w0 = dx12 * (py - y1) - dy12 * (px - x1);
+            double w1 = dx20 * (py - y2) - dy20 * (px - x2);
+            double w2 = dx01 * (py - y0) - dy01 * (px - x0);
+            if (w0 >= 0.0 && w1 >= 0.0 && w2 >= 0.0) {
+                if (color.a == 255) {
+                    set_pixel(x, y, color);
+                } else {
+                    blend_pixel(x, y, color);
+                }
+            }
+        }
+    }
+}
+
 void FrameBuffer::copy_to_rgba(std::vector<uint8_t>& out_rgba) const {
     out_rgba.resize(pixel_count() * 4);
     for (size_t i = 0; i < pixel_count(); ++i) {

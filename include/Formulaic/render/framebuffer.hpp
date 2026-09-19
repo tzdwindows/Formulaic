@@ -64,6 +64,9 @@ public:
     void fill_circle_aa(double cx, double cy, double radius, Color color) noexcept;
     void draw_circle_aa(double cx, double cy, double radius, Color color, double thickness = 1.5) noexcept;
 
+    // Triangle rasterization
+    void fill_triangle(double x0, double y0, double x1, double y1, double x2, double y2, Color color) noexcept;
+
     void draw_text(int x, int y, std::string_view text, Color color, int scale = 1) noexcept;
 
     // Copy utilities

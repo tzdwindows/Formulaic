@@ -79,7 +79,13 @@ const std::unordered_map<std::string_view, size_t> kKnownFunctions = {
     // Spectral & Windowing (FFT) Functions
     {"hann", 1}, {"hamming", 1}, {"blackman", 1}, {"bartlett", 1},
     {"flattop", 1}, {"square_wave", 1}, {"sawtooth_wave", 1},
-    {"triangle_wave", 1}, {"dirichlet", 2}, {"gaussian", 3}, {"chirp", 4}
+    {"triangle_wave", 1}, {"dirichlet", 2}, {"gaussian", 3}, {"chirp", 4},
+
+    // Discrete & Number Theoretic (GMP) Functions
+    {"gcd", 2}, {"lcm", 2},
+    {"fact", 1}, {"factorial", 1},
+    {"bin", 2}, {"binomial", 2}, {"ncr", 2},
+    {"fib", 1}, {"fibonacci", 1}
 };
 
 } // anonymous namespace

@@ -6,13 +6,13 @@
 [![CMake](https://img.shields.io/badge/CMake-3.20%2B-green.svg)](https://cmake.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![NuGet](https://img.shields.io/nuget/v/Formulaic.svg?style=flat&logo=nuget)](https://www.nuget.org/packages/Formulaic/)
-[![GitHub Release](https://img.shields.io/badge/Release-v1.1.3-orange.svg)](https://github.com/tzdwindows/Formulaic/releases)
+[![GitHub Release](https://img.shields.io/badge/Release-v1.2.0-orange.svg)](https://github.com/tzdwindows/Formulaic/releases)
 [![Architecture](https://img.shields.io/badge/Arch-x64%20%7C%20x86-blue.svg)]()
 [![Build & Test](https://img.shields.io/badge/CTest-100%25%20Passed-brightgreen.svg)]()
 
 **现代 C++20 高性能数学函数表达式解析、微积分/FFT 计算与高品质图形渲染库**
 
-*支持显式曲线、隐式方程 (LHS = RHS)、参数方程与二维标量场渲染，具备零内存分配虚拟机、Win32 HWND 原生无闪烁双缓冲绑定、深度管线钩子与交互式可视化工作台。*
+*支持显式曲线、隐式方程 (LHS = RHS)、参数方程与二维标量场渲染，具备零内存分配虚拟机、Win32 HWND 原生无闪烁双缓冲绑定、标准双向 LaTeXLive 转换与矢量渲染引擎、高精度跨平台 GMP 算术以及深度管线钩子与交互式可视化工作台。*
 
 [核心特性](#核心特性) • [架构图解](#系统架构与渲染管线) • [效果演示图库](#渲染图库与视觉演示) • [快速开始](#快速开始与-api-示例) • [交互工作台](#分屏交互数学工作室) • [构建指南](#环境要求与构建指南)
 
@@ -30,7 +30,7 @@
 ### 2. 交互式可视化与分屏工作室 (Interactive Studio)
 <div align="center">
   <img src="assets/demo_editor_window.png" alt="Split-Window Mathematical Studio" width="95%" />
-  <p><em>图：Formulaic 实时分屏数学工作室 (test_editor_window) —— 左侧多行语法高亮与智能代码补全编辑框，右侧原生 HWND 60 FPS 亚像素抗锯齿渲染。</em></p>
+  <p><em>图：Formulaic 实时分屏数学工作室 (test_editor_window) —— 左侧多行语法高亮与智能代码补全编辑框、LaTeXLive 实时双向转换与剪贴板输出，右侧原生 HWND 60 FPS 亚像素抗锯齿渲染与浮动 LaTeX 公式看板。</em></p>
 </div>
 
 ### 3. 多模态渲染成果 (Rendering Showcase)
@@ -50,6 +50,10 @@
 | 数值微积分导数验证 (diff_step) | 快速傅里叶变换与窗函数 (FFT) |
 | :---: | :---: |
 | ![Calculus Derivative](assets/demo_calculus_derivative.png)<br><b>数值差分 ∂/∂x (sin x · cos y) 逼近</b> | ![FFT Windowing](assets/demo_fft_windowing.png)<br><b>hann 窗调制与三角波形发生器</b> |
+
+| 三维曲面预览 (3D Surface Sombrero) | 标准 LaTeXLive 渲染与公式看板 |
+| :---: | :---: |
+| ![3D Surface Sombrero](assets/demo_surface_3d_sombrero.png)<br><b>z = sin(√(x²+y²))/√(x²+y²) 透视网格与 Viridis 色谱渲染</b> | ![LaTeX Card](assets/demo_latex_card.png)<br><b>矢量排版微积分与多变量公式实时看板</b> |
 
 ---
 
@@ -98,7 +102,8 @@
   - 自动奇点/渐近线剔除（如 tan(x) 极点跳变检测，避免竖直连线伪影）。
   - Xiaolin Wu 亚像素反走样线段绘制，告别粗糙马赛克锯齿。
 - **隐函数方程渲染**：
-  - 经典 **Marching Squares** 算法，通过网格角点符号交替与线性插值实现亚像素平滑等值线绘制。
+  - 经典 **Marching Squares** 算法，结合 12 步微元二分迭代（12-step bisection），通过网格角点符号交替与线性插值实现亚像素平滑等值线绘制。
+  - **微胞分裂（Axis Splitting）**：精准捕获穿越坐标轴的极狭窄渐近双曲线分支（如 $1/x + 1/y = 50$ 在大范围缩放下的超细轮廓）。
 - **标量场色彩映射 (Colormaps)**：
   - 内置科学感知均匀色彩阶：`Viridis`、`Plasma`、`Jet`、`Coolwarm`。
 - **多格式离线导出**：
@@ -122,15 +127,33 @@
 - `CoordinateTransformHook`：空间坐标投影变换（如极坐标、对数坐标、球面投影）。
 - `PixelShaderHook`：逐像素着色器钩子（支持动态梯度色、光晕与程序纹理混合）。
 
-### 6. LaTeXLive 标准数学公式转换 (LaTeXLive Converter)
-- **标准 TeX Live 兼容**：将 Formulaic 表达式、隐式方程（如 `1/x + 1/y = 0`）与变量脚本实时转换为工业级标准的 LaTeXLive 数学代码。
-- **美观排版与符号映射**：
+### 6. 双向 LaTeXLive 转换与逆向编译 (Bidirectional LaTeXLive)
+- **正向转换 (`LatexConverter::convert`)**：
+  - 将 Formulaic 公式、隐式方程（如 `1/x + 1/y = 0`）与多行变量脚本实时转换为工业级标准 LaTeXLive 数学代码。
   - 分式自动排版为 `\frac{分子}{分母}`，消除外层冗余圆括号。
-  - 自动翻译希腊字母（`alpha` -> `\alpha`, `theta` -> `\theta`, `nu` -> `\nu` 等）与数学常数（`\pi`, `\infty`）。
-  - 下标自动规范化（`u0` -> `u_{0}`, `d2u_dx2` -> `\text{d2u}_{dx2}`, `lap_u` -> `\text{lap}_{u}`）。
+  - 自动翻译希腊字母（`\alpha`, `\theta`, `\nu`, `\pi` 等）与数学常数。
+  - 下标自动规范化（`u0` -> `u_{0}`, `d2u_dx2` -> `\text{d2u}_{dx2}`）。
   - 函数幂次专业表示（如 `\sin^{2}\left(x\right)`、`\sqrt{...}`、`\left| ... \right|`）。
-  - 多行变量赋值脚本自动生成 `\begin{aligned} ... \end{aligned}` 对齐环境，各行等号与最终方程精确纵向对齐。
-- **GUI 交互集成**：在 `test_editor_window.exe` 左侧操作面板提供实时的标准 LaTeX 预览与 "Copy LaTeX" 一键剪贴板复制功能。
+  - 多行变量赋值脚本自动生成 `\begin{aligned} ... \end{aligned}` 对齐环境。
+- **逆向编译 (`LatexConverter::to_script`)**：
+  - 将标准 LaTeXLive 代码一键逆向翻译为 Formulaic 可求值脚本。
+  - 自动处理多行 `aligned` 方程组为多行 `let` 赋值语句。
+  - 自动推导并声明未定义的自由未知参数（如玫瑰线方程 $\begin{cases} x = a \cos(3\theta)\cos(\theta) \\ y = a \cos(3\theta)\sin(\theta) \end{cases}$ 中自动补齐 `let a = 3.0;`）。
+  - 支持 `Expression::parse_latex` 直接编译并执行标准 LaTeX 数学公式。
+
+### 7. 矢量级高品质 LaTeXLive 实时渲染引擎 (Vector LaTeX Live Renderer)
+- **专业数学排版引擎 (`Formulaic::LatexRenderModule`)**：
+  - **自适应伸缩大定界符 (`DelimitedBox`)**：支持 `\left( ... \right)`、`\left[ ... \right]`、`\left\{ ... \right\}`、`\left| ... \right|`。根据内嵌分式高度与数学中心轴动态计算光滑三次贝塞尔曲度，实现学术级对称延展。
+  - **分式垂直间隙精确微调**：分子分母与分式横线间严格保留安全间隙，彻底消除文字下行部与横线重合。
+  - **光学字距微调**：智能消除多余内边距补白，保持 $(u)$、$(x, y)$ 等数学表达式紧凑自然。
+  - **操作符转义清除**：自动处理 `\operatorname{tri\_wave}` 等宏包转义，消除多余反斜杠字面量。
+  - **超高分辨率图像导出**：支持将数学公式以任意磅值（如 36pt / 48pt）离线导出为抗锯齿透明或背景纯色矢量品质 PNG / BMP 图像。
+  - **画板悬浮公式 HUD 看板**：`RasterEngine::plot_latex_card` 实时将排版后的 LaTeX 公式卡片悬浮置于交互画布顶层。
+
+### 8. 高精度跨平台 GMP / mini-gmp 多精度运算 (Multi-Precision GMP)
+- **GMP 引擎集成 (`Formulaic::math::BigInt`, `Rational`, `GmpEvaluator`)**：
+  - x64 平台无缝衔接硬件汇编加速的 GNU MP 运算库；Win32 / x86 平台自带集成自包含轻量级 `mini-gmp` 与 `mini-mpq`，零配置全平台即插即用。
+  - 彻底攻克渐近极点跳变伪影，完美支持如 $\ln(\sin(x))$ 等渐近奇点函数在实数与负域的高速精确光栅化渲染。
 
 ---
 
@@ -198,19 +221,25 @@ Formulaic/
 │       │   ├── export.hpp
 │       │   ├── types.hpp
 │       │   └── error.hpp
-│       ├── parser/             # 表达式、语法树与字节码
+│       ├── parser/             # 表达式、语法树与 LaTeXLive 转换器
 │       │   ├── token.hpp
 │       │   ├── ast.hpp
 │       │   ├── bytecode.hpp
-│       │   └── expression.hpp
-│       ├── math/               # 微积分与快速傅里叶变换
+│       │   ├── expression.hpp
+│       │   └── latex_converter.hpp
+│       ├── math/               # 微积分、FFT 与多精度 GMP 算术
 │       │   ├── calculus.hpp
-│       │   └── fft.hpp
-│       ├── render/             # 视口、双缓冲表面与光栅化引擎
+│       │   ├── fft.hpp
+│       │   ├── bigint.hpp
+│       │   ├── rational.hpp
+│       │   ├── gmp_types.hpp
+│       │   └── gmp_evaluator.hpp
+│       ├── render/             # 视口、双缓冲表面与 LaTeX 矢量排版引擎
 │       │   ├── color.hpp
 │       │   ├── viewport.hpp
 │       │   ├── framebuffer.hpp
 │       │   ├── raster_engine.hpp
+│       │   ├── latex_render_module.hpp
 │       │   ├── image_export.hpp
 │       │   ├── frame_stream.hpp
 │       │   └── window_renderer.hpp
@@ -218,15 +247,17 @@ Formulaic/
 │           ├── hooks.hpp
 │           └── pipeline_hooks.hpp
 ├── src/                        # 内部私有实现 (Private Implementation)
-│   ├── parser/                 # Lexer、Parser、Compiler、VM
-│   ├── math/                   # 数值求导、积分、1D/2D FFT
-│   └── render/                 # 光栅化算法、BMP 导出与 Win32 DIB 呈现
+│   ├── parser/                 # Lexer、Parser、Compiler、VM、LaTeX 双向转换
+│   ├── math/                   # 数值求导、积分、1D/2D FFT、GMP 多精度
+│   └── render/                 # 光栅化算法、LaTeX 矢量排版、BMP 导出与 Win32 DIB
 ├── test/                       # 全覆盖单元测试与交互测试
 │   ├── test_parser.cpp         # 表达式求值与性能测试
 │   ├── test_raster.cpp         # 渲染与帧流生成测试
 │   ├── test_window_hook.cpp    # HWND 绑定与钩子调用测试
 │   ├── test_custom_render.cpp  # 自定义输入与命令行渲染测试
-│   └── test_editor_window.cpp  # 分屏交互式数学工作台（高亮与代码补全）
+│   ├── test_editor_window.cpp  # 分屏交互式数学工作台（高亮、代码补全与 LaTeX 转换）
+│   ├── test_gmp.cpp            # GMP / mini-gmp 多精度与有理数测试
+│   └── test_latex.cpp          # LaTeXLive 双向互转与高分辨率矢量渲染测试
 └── examples/                   # 示例程序
     ├── example_static.cpp      # 静态库链接调用与静态图导出
     └── example_interactive_window.cpp # 动态库交互窗口与平滑动画演示
@@ -358,6 +389,97 @@ renderer->render(current_time);
 renderer->present(); // 毫秒级极速 blit
 ```
 
+### 6. 标准 LaTeXLive 双向转换与逆向编译
+```cpp
+#include <Formulaic/parser/latex_converter.hpp>
+#include <Formulaic/parser/expression.hpp>
+#include <iostream>
+
+// 1. 正向将 Formulaic 方程转为标准 LaTeXLive
+auto tex = formulaic::LatexConverter::convert("1/x + 1/y = 0");
+std::cout << "LaTeX: " << tex.value() << "\n"; // \frac{1}{x} + \frac{1}{y} = 0
+
+// 2. 逆向将 LaTeX 代码编译为 Formulaic 脚本
+auto script = formulaic::LatexConverter::to_script("\sqrt{x^{2} + y^{2}} + \alpha \cdot \sin(\theta)");
+std::cout << "Script: " << script.value() << "\n"; // sqrt(x^2 + y^2) + alpha * sin(theta)
+
+// 3. 直接解析并求值 LaTeX 代码
+auto expr = formulaic::Expression::parse_latex("\sin(x) + \cos(y)");
+double val = expr->eval(0.0, 0.0); // 1.0
+```
+
+### 7. 矢量级高品质 LaTeXLive 公式渲染与离线高清图像导出
+```cpp
+#include <Formulaic/render/latex_render_module.hpp>
+
+// 1. 将复杂公式导出为超高分辨率 PNG 图像（支持动态伸缩大括号、分式与对齐方程组）
+const std::string math_formula = 
+    "\begin{aligned} u &= \operatorname{clamp}\left(\frac{x + 5}{10}, 0, 1\right) \\
+"
+    "f(x, y) &= \operatorname{hann}\left(u\right) \cdot \operatorname{tri\_wave}\left(u \cdot 5 - t \cdot 0.5\right)\end{aligned}";
+
+bool ok = formulaic::LatexRenderModule::export_math_image(
+    math_formula,
+    "rendered_formula.png",
+    formulaic::Color::White,
+    formulaic::Color(24, 24, 37, 255), // 雅致深色背景
+    36.0f // 36pt 超清数学矢量字形
+);
+
+// 2. 将公式渲染为内存 FrameBuffer 并悬浮于画布之上
+formulaic::FrameBuffer card_fb = formulaic::LatexRenderModule::render_math_to_framebuffer(
+    math_formula, formulaic::Color::White, formulaic::Color::BackgroundDark, 28.0f
+);
+```
+
+### 8. 跨平台多精度 GMP 与有理数高精度运算
+```cpp
+#include <Formulaic/math/bigint.hpp>
+#include <Formulaic/math/rational.hpp>
+#include <Formulaic/math/gmp_evaluator.hpp>
+#include <iostream>
+
+// 1. 任意精度高精度整数算术 (x64 GMP 硬件加速 / x86 mini-gmp)
+formulaic::math::BigInt a("123456789012345678901234567890");
+formulaic::math::BigInt b("987654321098765432109876543210");
+auto c = a * b;
+std::cout << "Product: " << c.to_string() << "\n";
+
+// 2. 精确分数与有理数四则运算
+formulaic::math::Rational r1(1, 3);
+formulaic::math::Rational r2(1, 6);
+auto r3 = r1 + r2; // 精确 1/2
+std::cout << "1/3 + 1/6 = " << r3.to_string() << "\n"; // "1/2"
+```
+
+### 9. 三维曲面实时预览与透视色谱渲染
+```cpp
+#include <Formulaic/parser/expression.hpp>
+#include <Formulaic/render/raster_engine.hpp>
+#include <Formulaic/render/framebuffer.hpp>
+
+formulaic::FrameBuffer fb(800, 600, formulaic::Color::BackgroundDark);
+formulaic::RasterEngine engine;
+
+// 1. 解析三维曲面方程或二元函数
+auto expr = formulaic::Expression::parse("sin(sqrt(x^2 + y^2)) / sqrt(x^2 + y^2)");
+
+// 2. 配置三维投影风格：方位角、俯仰角、网格密度与色谱
+formulaic::Surface3DStyle style;
+style.azimuth_deg = 45.0;    // 偏航角
+style.elevation_deg = 30.0;  // 俯仰角
+style.zoom = 1.0;            // 缩放倍率
+style.grid_resolution_x = 55;
+style.grid_resolution_y = 55;
+style.colormap = formulaic::ColormapType::Viridis;
+style.show_mesh_faces = true;
+style.show_wireframe = true;
+style.show_box_axes = true;
+
+// 3. 渲染三维曲面 (内置深度排序消隐与双面定向光照)
+engine.plot_surface_3d(fb, expr.value(), style);
+```
+
 ---
 
 ## 分屏交互数学工作室
@@ -373,8 +495,13 @@ renderer->present(); // 毫秒级极速 blit
   - 输入字符即时联想，覆盖全部三角、双曲、微积分、FFT 窗函数与物理常数。
   - 键盘 `↑` / `↓` 导航候选项目，按下 `Tab` 或 `Enter` 自动补全并填充括号与居中光标。
   - 按下 `Esc` 键随时轻量关闭建议框。
-* **左侧面板**：支持输入任意公式、变量声明、微积分与方程，附带实时红字语法诊断、变量监控与一键预设导入。
-* **右侧视口**：实时呈现 60 FPS 平滑渲染视口，支持左键拖拽平移、滚轮以光标缩放以及智能光标数值悬浮指示。
+* **LaTeXLive 实时双向转换面板**：
+  - 左侧操作面板提供实时生成的标准 LaTeXLive 代码显示框。
+  - 提供 **Copy LaTeX** 一键复制按钮，随时粘贴至 Overleaf、Markdown 或学术论文。
+  - 提供 **LaTeX -> Script** 反向编译按钮，支持直接将外部 LaTeX 格式粘贴导入并立即在右侧画布渲染。
+* **右侧视口与浮动 HUD 看板**：
+  - 实时呈现 60 FPS 平滑渲染视口，左上角浮动优雅的矢量级 LaTeXLive 真实公式卡片。
+  - 支持左键拖拽平移、滚轮以光标缩放以及智能光标数值悬浮指示。
 
 ---
 

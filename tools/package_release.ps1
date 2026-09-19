@@ -1,6 +1,6 @@
 $ErrorActionPreference = "Stop"
 
-$version = "v1.1.3"
+$version = "v1.2.0"
 $distBase = "F:\Formulaic\dist"
 if (-not (Test-Path $distBase)) {
     New-Item -ItemType Directory -Force -Path $distBase | Out-Null

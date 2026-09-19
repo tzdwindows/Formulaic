@@ -258,6 +258,85 @@ int main() {
         TEST_ASSERT(fb.width() == 400, "RasterEngine plot_latex & plot_latex_card passed");
     }
 
+    // Test 17: User case - Three-petal rose parametric system: \begin{cases} x = a \cos(3\theta)\cos(\theta) \\ y = a \cos(3\theta)\sin(\theta) \end{cases}
+    {
+        const std::string rose_latex =
+            "$$\\begin{cases} x = a \\cos(3\\theta)\\cos(\\theta) \\\\ y = a \\cos(3\\theta)\\sin(\\theta) \\end{cases} \\quad (\\theta \\in [0, \\pi])$$";
+        auto res = formulaic::LatexConverter::to_script(rose_latex);
+        TEST_ASSERT(res.has_value(), "Three-petal rose cases converted successfully");
+        std::cout << "17. Three-petal rose script ->\n" << res.value() << std::endl;
+        TEST_ASSERT_CONTAINS(res.value(), "let a = 3", "Free parameter 'a' automatically declared");
+        TEST_ASSERT_CONTAINS(res.value(), "hypot(x, y)", "Radial distance defined");
+        TEST_ASSERT_CONTAINS(res.value(), "atan2(y, x)", "Polar angle defined");
+        TEST_ASSERT_CONTAINS(res.value(), "r - a * cos(3 * theta) = 0", "Rose implicit equation formed");
+
+        // Verify the resulting script compiles cleanly into an Expression via parse_equation and parse_latex
+        auto expr_res = formulaic::Expression::parse_equation(res.value());
+        TEST_ASSERT(expr_res.has_value(), "Generated rose script parses into valid Expression without unknown identifier errors");
+
+        auto expr_latex = formulaic::Expression::parse_latex(rose_latex);
+        TEST_ASSERT(expr_latex.has_value(), "parse_latex compiles three-petal rose directly");
+    }
+
+    // Test 18: High Quality LaTeXLive Vector Math Rendering & Image Export
+    {
+        // 18a: User reference image formula: (x - 10)^2 + (y - 2)^2 = 5^2
+        const std::string circle_tex = "(x - 10)^2 + (y - 2)^2 = 5^2";
+        auto fb_circle = formulaic::LatexRenderModule::render_math_to_framebuffer(circle_tex, formulaic::Color::Black, formulaic::Color::White, 36.0f);
+        TEST_ASSERT(fb_circle.width() > 100 && fb_circle.height() > 30, "Circle formula rendered to FrameBuffer with proper dimensions");
+
+        bool exp1 = formulaic::LatexRenderModule::export_math_image(
+            circle_tex,
+            "F:/Formulaic/build/latex_circle_rendered.png",
+            formulaic::Color::Black,
+            formulaic::Color::White,
+            48.0f
+        );
+        TEST_ASSERT(exp1, "Circle LaTeXLive image exported successfully as PNG");
+
+        // 18b: User cases equation: \begin{cases} x = a \cos(3\theta)\cos(\theta) \\ y = a \cos(3\theta)\sin(\theta) \end{cases} \quad (\theta \in [0, \pi])
+        const std::string rose_tex = "$$\\begin{cases} x = a \\cos(3\\theta)\\cos(\\theta) \\\\ y = a \\cos(3\\theta)\\sin(\\theta) \\end{cases} \\quad (\\theta \\in [0, \\pi])$$";
+        auto fb_rose = formulaic::LatexRenderModule::render_math_to_framebuffer(rose_tex, formulaic::Color::White, formulaic::Color::BackgroundDark, 28.0f);
+        TEST_ASSERT(fb_rose.width() > 200 && fb_rose.height() > 50, "Cases rose formula rendered to FrameBuffer with proper dimensions");
+
+        bool exp2 = formulaic::LatexRenderModule::export_math_image(
+            rose_tex,
+            "F:/Formulaic/build/latex_rose_rendered.png",
+            formulaic::Color::White,
+            formulaic::Color(24, 24, 37, 255),
+            36.0f
+        );
+        TEST_ASSERT(exp2, "Cases rose LaTeXLive image exported successfully as PNG");
+        // 18c: Image 2 formula: Spiral Waves multiline aligned
+        const std::string multi_tex =
+            "\\begin{aligned} r &= \\sqrt{x^{2} + y^{2}} \\\\\n"
+            "\\theta &= \\operatorname{atan2}\\left(y, x\\right) \\\\\n"
+            "\\text{envelope} &= e^{-0.35 \\cdot r} \\\\\n"
+            "f(x, y) &= \\sin\\left(6 \\cdot \\theta + 2 \\cdot t\\right) \\cdot \\text{envelope}\\end{aligned}";
+        bool exp3 = formulaic::LatexRenderModule::export_math_image(
+            multi_tex,
+            "F:/Formulaic/build/latex_multiline_rendered.png",
+            formulaic::Color::White,
+            formulaic::Color(24, 24, 37, 255),
+            28.0f
+        );
+        TEST_ASSERT(exp3, "Multiline formula exported to PNG");
+
+        // 18d: Image 1 formula: FFT Window clamp & tri_wave
+        const std::string clamp_tex =
+            "\\begin{aligned} u &= \\operatorname{clamp}\\left(\\frac{x + 5}{10}, 0, 1\\right) \\\\\n"
+            "f(x, y) &= \\operatorname{hann}\\left(u\\right) \\cdot \\operatorname{tri\\_wave}\\left(u \\cdot 5 - t \\cdot 0.5\\right)\\end{aligned}";
+        bool exp4 = formulaic::LatexRenderModule::export_math_image(
+            clamp_tex,
+            "F:/Formulaic/build/latex_clamp_rendered.png",
+            formulaic::Color::White,
+            formulaic::Color(24, 24, 37, 255),
+            28.0f
+        );
+        TEST_ASSERT(exp4, "Clamp tri_wave formula exported to PNG");
+        std::cout << "18. High-resolution LaTeXLive formulas rendered and exported to PNG successfully!\n";
+    }
+
     std::cout << "\n>>> All LaTeXLive conversion, reverse to_script & rendering module tests PASSED successfully! <<<\n";
     return 0;
 }

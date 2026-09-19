@@ -381,6 +381,66 @@ int main() {
         std::cout << "PASSED -> ln(sin(x)) asymptotic boundary verified!\n";
     }
 
+    // 11. 3D Surface Preview: z = sin(sqrt(x^2 + y^2)) / sqrt(x^2 + y^2) (Sombrero / 2D sinc wave)
+    {
+        std::cout << "[Test 11] 3D Surface Preview: z = sin(sqrt(x^2+y^2))/sqrt(x^2+y^2)... ";
+        formulaic::FrameBuffer fb(800, 600, formulaic::Color::BackgroundDark);
+        formulaic::RasterEngine engine;
+
+        auto expr_res = formulaic::Expression::parse("sin(sqrt(x^2 + y^2)) / sqrt(x^2 + y^2)");
+        TEST_ASSERT(expr_res.has_value(), "Sombrero 3D surface expression parsed");
+
+        formulaic::Surface3DStyle style;
+        style.azimuth_deg = 45.0;
+        style.elevation_deg = 30.0;
+        style.zoom = 1.0;
+        style.grid_resolution_x = 50;
+        style.grid_resolution_y = 50;
+        style.show_mesh_faces = true;
+        style.show_wireframe = true;
+        style.show_box_axes = true;
+
+        engine.plot_surface_3d(fb, expr_res.value(), style);
+
+        // Verify non-background pixels were rendered
+        int drawn_pixels = 0;
+        for (int y = 0; y < fb.height(); ++y) {
+            for (int x = 0; x < fb.width(); ++x) {
+                auto p = fb.get_pixel(x, y);
+                if (p.r != formulaic::Color::BackgroundDark.r ||
+                    p.g != formulaic::Color::BackgroundDark.g ||
+                    p.b != formulaic::Color::BackgroundDark.b) {
+                    drawn_pixels++;
+                }
+            }
+        }
+        TEST_ASSERT(drawn_pixels > 5000, "3D Surface mesh rendered significant number of pixels");
+
+        auto bmp_path = output_dir / "test_surface_3d_sombrero.bmp";
+        auto res = formulaic::ImageExport::save_bmp(fb, bmp_path);
+        TEST_ASSERT(res.has_value(), res.error().format());
+        TEST_ASSERT(std::filesystem::exists(bmp_path), "Sombrero 3D BMP exists");
+
+        // Verify plot_latex automatically dispatches 3D surface for z = ...
+        formulaic::FrameBuffer fb_latex(800, 600, formulaic::Color::BackgroundDark);
+        formulaic::Viewport vp(800, 600, formulaic::Rect2D(-5.0, 5.0, -5.0, 5.0));
+        engine.plot_latex(fb_latex, vp, "z = \\frac{\\sin(\\sqrt{x^2 + y^2})}{\\sqrt{x^2 + y^2}}");
+        int latex_drawn = 0;
+        for (int y = 0; y < fb_latex.height(); ++y) {
+            for (int x = 0; x < fb_latex.width(); ++x) {
+                auto p = fb_latex.get_pixel(x, y);
+                if (p.r != formulaic::Color::BackgroundDark.r ||
+                    p.g != formulaic::Color::BackgroundDark.g ||
+                    p.b != formulaic::Color::BackgroundDark.b) {
+                    latex_drawn++;
+                }
+            }
+        }
+        TEST_ASSERT(latex_drawn > 5000, "plot_latex automatically plotted 3D surface for z = \\frac{...}{...}");
+
+        std::cout << "PASSED -> Saved to " << bmp_path.string() << "\n";
+    }
+
     std::cout << "\n>>> All Offline Raster & Exporter Tests PASSED successfully! <<<\n";
     return 0;
 }

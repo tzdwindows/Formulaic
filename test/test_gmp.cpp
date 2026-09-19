@@ -2,9 +2,17 @@
 #include <Formulaic/math/rational.hpp>
 #include <Formulaic/math/gmp_evaluator.hpp>
 #include <Formulaic/parser/expression.hpp>
-#include <cassert>
 #include <cmath>
+#include <cstdlib>
 #include <iostream>
+
+#define assert(cond) \
+    do { \
+        if (!(cond)) { \
+            std::cerr << "Assertion failed: [" << #cond << "] at " << __FILE__ << ":" << __LINE__ << std::endl; \
+            std::exit(1); \
+        } \
+    } while (0)
 
 using namespace formulaic::math;
 
@@ -19,7 +27,7 @@ static void test_bigint_basics() {
     assert(c == BigInt("1111111110111110"));
 
     BigInt mul = a * b;
-    assert(mul.to_string() == "121932631137021160352528148725");
+    assert(mul.to_string() == "121932631137021071359549253925");
 
     BigInt q = mul / a;
     BigInt r = mul % a;

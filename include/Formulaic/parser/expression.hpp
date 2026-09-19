@@ -18,25 +18,29 @@ public:
 
     [[nodiscard]] static Result<Expression> parse(
         std::string_view expression_text,
-        const std::vector<std::string>& variable_names = {"x", "y", "t"}
+        const std::vector<std::string>& variable_names = {"x", "y", "t", "z"}
     );
 
     // Parses mathematical equation LHS = RHS or LHS == RHS into an implicit function (LHS) - (RHS)
     [[nodiscard]] static Result<Expression> parse_equation(
         std::string_view equation_text,
-        const std::vector<std::string>& variable_names = {"x", "y", "t"}
+        const std::vector<std::string>& variable_names = {"x", "y", "t", "z"}
     );
 
     // Parses a standard LaTeXLive formula directly into an executable Expression
     [[nodiscard]] static Result<Expression> parse_latex(
         std::string_view latex_text,
-        const std::vector<std::string>& variable_names = {"x", "y", "t", "r", "u", "v", "h"}
+        const std::vector<std::string>& variable_names = {"x", "y", "t", "z", "r", "u", "v", "h"}
     );
 
     // High frequency evaluation with zero heap allocation
     [[nodiscard]] double evaluate(std::span<const double> variables) const noexcept;
 
-    // Convenience evaluators for 1, 2, and 3 variables (e.g. x, y, t)
+    // Convenience evaluators for 0, 1, 2, and 3 variables (e.g. x, y, t)
+    [[nodiscard]] double eval() const noexcept {
+        return evaluate({});
+    }
+
     [[nodiscard]] double eval(double x) const noexcept {
         const double vars[1] = {x};
         return evaluate(std::span<const double, 1>(vars));

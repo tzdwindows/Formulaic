@@ -29,6 +29,25 @@ struct Point2D {
     }
 };
 
+struct Point3D {
+    double x{0.0};
+    double y{0.0};
+    double z{0.0};
+
+    constexpr Point3D() noexcept = default;
+    constexpr Point3D(double in_x, double in_y, double in_z) noexcept : x(in_x), y(in_y), z(in_z) {}
+
+    [[nodiscard]] constexpr Point3D operator+(const Point3D& other) const noexcept {
+        return {x + other.x, y + other.y, z + other.z};
+    }
+    [[nodiscard]] constexpr Point3D operator-(const Point3D& other) const noexcept {
+        return {x - other.x, y - other.y, z - other.z};
+    }
+    [[nodiscard]] constexpr Point3D operator*(double s) const noexcept {
+        return {x * s, y * s, z * s};
+    }
+};
+
 struct Point2I {
     int x{0};
     int y{0};

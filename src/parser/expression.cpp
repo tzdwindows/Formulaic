@@ -40,51 +40,65 @@ Result<Expression> Expression::parse_equation(
     std::string_view equation_text,
     const std::vector<std::string>& variable_names
 ) {
-    int paren_depth = 0;
-    size_t eq_pos = std::string_view::npos;
-    size_t eq_len = 0;
+    std::string text(equation_text);
+    while (!text.empty() && (text.back() == ' ' || text.back() == '\t' || text.back() == '\r' || text.back() == '\n' || text.back() == ';')) {
+        text.pop_back();
+    }
 
-    for (size_t i = 0; i < equation_text.size(); ++i) {
-        char c = equation_text[i];
-        if (c == '(') {
-            ++paren_depth;
-        } else if (c == ')') {
-            if (paren_depth > 0) --paren_depth;
-        } else if (paren_depth == 0) {
-            if (c == '=' && i > 0 && (equation_text[i-1] == '!' || equation_text[i-1] == '<' || equation_text[i-1] == '>')) {
-                continue;
-            }
-            if (c == '=') {
-                eq_pos = i;
-                eq_len = (i + 1 < equation_text.size() && equation_text[i+1] == '=') ? 2 : 1;
+    size_t last_semi = std::string::npos;
+    int paren_cnt = 0;
+    for (size_t i = 0; i < text.size(); ++i) {
+        if (text[i] == '(') ++paren_cnt;
+        else if (text[i] == ')') { if (paren_cnt > 0) --paren_cnt; }
+        else if (text[i] == ';' && paren_cnt == 0) last_semi = i;
+    }
+
+    std::string prefix_stmts = (last_semi != std::string::npos) ? text.substr(0, last_semi + 1) + "\n" : "";
+    std::string last_stmt = (last_semi != std::string::npos) ? text.substr(last_semi + 1) : text;
+
+    size_t s_idx = 0;
+    while (s_idx < last_stmt.size() && (last_stmt[s_idx] == ' ' || last_stmt[s_idx] == '\t' || last_stmt[s_idx] == '\r' || last_stmt[s_idx] == '\n')) ++s_idx;
+    std::string_view prefix = std::string_view(last_stmt).substr(s_idx, 4);
+
+    bool is_eq = false;
+    std::string eq_lhs, eq_rhs;
+    if (prefix != "let " && prefix != "var ") {
+        int p_depth = 0;
+        for (size_t p = 0; p < last_stmt.size(); ++p) {
+            if (last_stmt[p] == '(') ++p_depth;
+            else if (last_stmt[p] == ')') { if (p_depth > 0) --p_depth; }
+            else if (p_depth == 0 && last_stmt[p] == '=') {
+                if (p > 0 && (last_stmt[p-1] == '!' || last_stmt[p-1] == '<' || last_stmt[p-1] == '>')) continue;
+                size_t eq_len = (p + 1 < last_stmt.size() && last_stmt[p+1] == '=') ? 2 : 1;
+                eq_lhs = last_stmt.substr(0, p);
+                eq_rhs = last_stmt.substr(p + eq_len);
+                is_eq = true;
                 break;
             }
         }
     }
 
-    if (eq_pos == std::string_view::npos) {
-        return parse(equation_text, variable_names);
+    if (is_eq) {
+        auto trim_str = [](std::string s) -> std::string {
+            while (!s.empty() && (s.front() == ' ' || s.front() == '\t' || s.front() == '\r' || s.front() == '\n')) s.erase(0, 1);
+            while (!s.empty() && (s.back() == ' ' || s.back() == '\t' || s.back() == '\r' || s.back() == '\n' || s.back() == ';')) s.pop_back();
+            return s;
+        };
+        eq_lhs = trim_str(eq_lhs);
+        eq_rhs = trim_str(eq_rhs);
+
+        if (eq_lhs == "y" || eq_lhs == "z") {
+            auto rhs_res = parse(prefix_stmts + eq_rhs + ";", variable_names);
+            if (rhs_res.has_value() && !rhs_res->references_variable(eq_lhs)) {
+                return rhs_res;
+            }
+        }
+
+        std::string implicit_expr = prefix_stmts + "(" + eq_lhs + ") - (" + eq_rhs + ");";
+        return parse(implicit_expr, variable_names);
     }
 
-    auto trim = [](std::string_view s) -> std::string_view {
-        while (!s.empty() && (s.front() == ' ' || s.front() == '\t' || s.front() == '\r' || s.front() == '\n')) {
-            s.remove_prefix(1);
-        }
-        while (!s.empty() && (s.back() == ' ' || s.back() == '\t' || s.back() == '\r' || s.back() == '\n' || s.back() == ';')) {
-            s.remove_suffix(1);
-        }
-        return s;
-    };
-
-    std::string_view lhs = trim(equation_text.substr(0, eq_pos));
-    std::string_view rhs = trim(equation_text.substr(eq_pos + eq_len));
-
-    if (lhs.empty() || rhs.empty()) {
-        return parse(equation_text, variable_names);
-    }
-
-    std::string implicit_expr = "(" + std::string(lhs) + ") - (" + std::string(rhs) + ")";
-    return parse(implicit_expr, variable_names);
+    return parse(equation_text, variable_names);
 }
 
 Result<Expression> Expression::parse_latex(
@@ -95,12 +109,7 @@ Result<Expression> Expression::parse_latex(
     if (!script_res) {
         return script_res.error();
     }
-    const std::string& script = script_res.value();
-    size_t last_eq = script.find('=');
-    if (last_eq != std::string::npos && script.find("let ") == std::string::npos && script.find("var ") == std::string::npos) {
-        return parse_equation(script, variable_names);
-    }
-    return parse(script, variable_names);
+    return parse_equation(script_res.value(), variable_names);
 }
 
 double Expression::evaluate(std::span<const double> variables) const noexcept {

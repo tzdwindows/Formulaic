@@ -317,7 +317,13 @@ std::string Rational::to_string(int base) const {
     char* str = mpq_get_str(nullptr, base, val_);
     if (!str) return "0";
     std::string s(str);
-    free(str);
+    void (*free_func)(void*, size_t) = nullptr;
+    mp_get_memory_functions(nullptr, nullptr, &free_func);
+    if (free_func) {
+        free_func(str, s.size() + 1);
+    } else {
+        free(str);
+    }
     return s;
 #else
     return std::to_string(fallback_num_) + "/" + std::to_string(fallback_den_);

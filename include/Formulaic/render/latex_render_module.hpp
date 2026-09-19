@@ -24,6 +24,8 @@ struct FORMULAIC_API LatexRenderStyle {
     int card_margin_x{20};
     int card_margin_y{20};
     int font_scale{1};
+    float font_size_pt{22.0f};
+    std::string font_family{"Cambria Math"};
 
     LatexRenderStyle() = default;
 };
@@ -53,6 +55,25 @@ public:
         int y,
         std::string_view latex_text,
         const LatexRenderStyle& style = LatexRenderStyle()
+    );
+
+    // Renders a high-resolution mathematical formula directly to a new FrameBuffer matching LaTeXLive style
+    [[nodiscard]] static FrameBuffer render_math_to_framebuffer(
+        std::string_view latex_text,
+        Color text_color = Color::Black,
+        Color bg_color = Color::Transparent,
+        float font_size_pt = 36.0f,
+        const std::string& font_family = "Cambria Math"
+    );
+
+    // Export a typeset formula image (PNG / BMP) matching LaTeXLive style
+    static bool export_math_image(
+        std::string_view latex_text,
+        const std::string& output_filepath,
+        Color text_color = Color::Black,
+        Color bg_color = Color::Transparent,
+        float font_size_pt = 48.0f,
+        const std::string& font_family = "Cambria Math"
     );
 
     // Combined rendering: plots curve/field and superimposes the visual formula banner card

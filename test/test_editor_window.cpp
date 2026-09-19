@@ -54,6 +54,7 @@ constexpr int IDC_AC_LIST        = 1009;
 constexpr int IDC_BTN_COPY_LATEX       = 1010;
 constexpr int IDC_EDIT_LATEX           = 1011;
 constexpr int IDC_BTN_LATEX_TO_SCRIPT  = 1012;
+constexpr int IDC_BTN_PRESET5          = 1013;
 
 constexpr UINT_PTR TIMER_ANIM_ID     = 2001;
 constexpr UINT_PTR TIMER_DEBOUNCE_ID = 2002;
@@ -62,7 +63,8 @@ enum class PlotMode {
     Auto = 0,
     Explicit1D,
     ScalarField2D,
-    Implicit2D
+    Implicit2D,
+    Surface3D
 };
 
 struct AutocompleteItem {
@@ -77,6 +79,7 @@ static const std::vector<AutocompleteItem> kCatalog = {
     {"var", "keyword", false},
     {"x", "var", false},
     {"y", "var", false},
+    {"z", "var", false},
     {"t", "var", false},
     {"pi", "const", false},
     {"e", "const", false},
@@ -194,6 +197,11 @@ struct EditorWindowState {
     bool is_valid_expr{false};
     std::string error_message;
     PlotMode plot_mode{PlotMode::Auto};
+    bool is_surface_3d{false};
+    formulaic::Surface3DStyle surface_3d_style;
+    double surface_azimuth{45.0};
+    double surface_elevation{30.0};
+    double surface_zoom{1.0};
 
     HWND hwnd_main{nullptr};
     HWND hwnd_edit{nullptr};
@@ -265,14 +273,22 @@ static LRESULT CALLBACK CanvasWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM
                     if (dx != 0 || dy != 0) {
                         state->last_mouse_x = mx;
                         state->last_mouse_y = my;
-                        state->renderer->viewport().pan(dx, dy);
 
-                        formulaic::MouseEvent me{};
-                        me.type = formulaic::MouseEventType::Move;
-                        me.button = formulaic::MouseButton::Left;
-                        me.screen_pos = {mx, my};
-                        me.world_pos = state->renderer->viewport().screen_to_world(mx, my);
-                        state->renderer->dispatch_mouse_event(me);
+                        if (state->plot_mode == PlotMode::Surface3D || (state->plot_mode == PlotMode::Auto && state->is_surface_3d)) {
+                            state->surface_azimuth += dx * 0.5;
+                            while (state->surface_azimuth > 180.0) state->surface_azimuth -= 360.0;
+                            while (state->surface_azimuth < -180.0) state->surface_azimuth += 360.0;
+                            state->surface_elevation = std::clamp(state->surface_elevation - dy * 0.5, -89.0, 89.0);
+                        } else {
+                            state->renderer->viewport().pan(dx, dy);
+
+                            formulaic::MouseEvent me{};
+                            me.type = formulaic::MouseEventType::Move;
+                            me.button = formulaic::MouseButton::Left;
+                            me.screen_pos = {mx, my};
+                            me.world_pos = state->renderer->viewport().screen_to_world(mx, my);
+                            state->renderer->dispatch_mouse_event(me);
+                        }
 
                         if (!state->uses_time_t) {
                             state->renderer->render(state->get_elapsed_time());
@@ -287,12 +303,15 @@ static LRESULT CALLBACK CanvasWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM
         case WM_MOUSEWHEEL: {
             if (state && state->renderer) {
                 int delta = GET_WHEEL_DELTA_WPARAM(wparam);
-                double factor = (delta > 0) ? 1.15 : (1.0 / 1.15);
-
-                POINT pt{GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
-                ScreenToClient(hwnd, &pt);
-
-                state->renderer->viewport().zoom(factor, formulaic::Point2D(static_cast<double>(pt.x), static_cast<double>(pt.y)));
+                if (state->plot_mode == PlotMode::Surface3D || (state->plot_mode == PlotMode::Auto && state->is_surface_3d)) {
+                    state->surface_zoom *= (delta > 0) ? 1.15 : (1.0 / 1.15);
+                    state->surface_zoom = std::clamp(state->surface_zoom, 0.2, 10.0);
+                } else {
+                    double factor = (delta > 0) ? 1.15 : (1.0 / 1.15);
+                    POINT pt{GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
+                    ScreenToClient(hwnd, &pt);
+                    state->renderer->viewport().zoom(factor, formulaic::Point2D(static_cast<double>(pt.x), static_cast<double>(pt.y)));
+                }
                 if (!state->uses_time_t) {
                     state->renderer->render(state->get_elapsed_time());
                     state->renderer->present();
@@ -303,7 +322,13 @@ static LRESULT CALLBACK CanvasWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM
 
         case WM_LBUTTONDBLCLK: {
             if (state && state->renderer) {
-                state->renderer->viewport().set_bounds(formulaic::Rect2D(-5.0, 5.0, -5.0, 5.0));
+                if (state->plot_mode == PlotMode::Surface3D || (state->plot_mode == PlotMode::Auto && state->is_surface_3d)) {
+                    state->surface_azimuth = 45.0;
+                    state->surface_elevation = 30.0;
+                    state->surface_zoom = 1.0;
+                } else {
+                    state->renderer->viewport().set_bounds(formulaic::Rect2D(-5.0, 5.0, -5.0, 5.0));
+                }
                 if (!state->uses_time_t) {
                     state->renderer->render(state->get_elapsed_time());
                     state->renderer->present();
@@ -818,6 +843,7 @@ static void update_expression_from_edit(EditorWindowState* state) {
             if (rhs_res.has_value() && !rhs_res->references_variable("y")) {
                 parse_res = std::move(rhs_res);
                 state->plot_mode = PlotMode::Explicit1D;
+                state->is_surface_3d = false;
                 if (state->hwnd_combo_mode) {
                     SendMessageA(state->hwnd_combo_mode, CB_SETCURSEL, static_cast<WPARAM>(PlotMode::Explicit1D), 0);
                 }
@@ -825,6 +851,26 @@ static void update_expression_from_edit(EditorWindowState* state) {
                 std::string implicit_script = prefix_stmts + "(" + eq_lhs + ") - (" + eq_rhs + ");";
                 parse_res = formulaic::Expression::parse(implicit_script);
                 state->plot_mode = PlotMode::Implicit2D;
+                state->is_surface_3d = false;
+                if (state->hwnd_combo_mode) {
+                    SendMessageA(state->hwnd_combo_mode, CB_SETCURSEL, static_cast<WPARAM>(PlotMode::Implicit2D), 0);
+                }
+            }
+        } else if (eq_lhs == "z") {
+            std::string expr_candidate = prefix_stmts + eq_rhs + ";";
+            auto rhs_res = formulaic::Expression::parse(expr_candidate);
+            if (rhs_res.has_value() && !rhs_res->references_variable("z")) {
+                parse_res = std::move(rhs_res);
+                state->plot_mode = PlotMode::Surface3D;
+                state->is_surface_3d = true;
+                if (state->hwnd_combo_mode) {
+                    SendMessageA(state->hwnd_combo_mode, CB_SETCURSEL, static_cast<WPARAM>(PlotMode::Surface3D), 0);
+                }
+            } else {
+                std::string implicit_script = prefix_stmts + "(" + eq_lhs + ") - (" + eq_rhs + ");";
+                parse_res = formulaic::Expression::parse(implicit_script);
+                state->plot_mode = PlotMode::Implicit2D;
+                state->is_surface_3d = false;
                 if (state->hwnd_combo_mode) {
                     SendMessageA(state->hwnd_combo_mode, CB_SETCURSEL, static_cast<WPARAM>(PlotMode::Implicit2D), 0);
                 }
@@ -834,9 +880,14 @@ static void update_expression_from_edit(EditorWindowState* state) {
             std::string implicit_script = prefix_stmts + "(" + eq_lhs + ") - (" + eq_rhs + ");";
             parse_res = formulaic::Expression::parse(implicit_script);
             state->plot_mode = PlotMode::Implicit2D;
+            state->is_surface_3d = false;
             if (state->hwnd_combo_mode) {
                 SendMessageA(state->hwnd_combo_mode, CB_SETCURSEL, static_cast<WPARAM>(PlotMode::Implicit2D), 0);
             }
+        }
+    } else {
+        if (state->plot_mode == PlotMode::Surface3D) {
+            state->is_surface_3d = true;
         }
     }
 
@@ -865,13 +916,19 @@ static void update_expression_from_edit(EditorWindowState* state) {
 
     std::string status_info;
     if (is_equation) {
-        if (eq_rhs == "0" && (eq_lhs == "x^2 + y^2" || eq_lhs == "x^2+y^2" || eq_lhs == "x*x + y*y" || eq_lhs == "x*x+y*y")) {
+        if (eq_lhs == "z") {
+            status_info = "Status: 3D Surface (" + eq_lhs + " = " + eq_rhs + ") [3D Preview] | " + var_summary;
+        } else if (eq_rhs == "0" && (eq_lhs == "x^2 + y^2" || eq_lhs == "x^2+y^2" || eq_lhs == "x*x + y*y" || eq_lhs == "x*x+y*y")) {
             status_info = "Status: Valid Equation (x^2+y^2=0) [Implicit Mode]\nNote: x^2+y^2=0 is a single point (0,0). For a visible circle try: x^2+y^2=4";
         } else {
             status_info = "Status: Valid Equation (" + eq_lhs + " = " + eq_rhs + ") [Implicit Mode] | " + var_summary;
         }
     } else {
-        status_info = "Status: Valid | " + var_summary;
+        if (state->plot_mode == PlotMode::Surface3D) {
+            status_info = "Status: 3D Surface [3D Preview] | " + var_summary;
+        } else {
+            status_info = "Status: Valid | " + var_summary;
+        }
         status_info += " | Bytecode: " + std::to_string(state->current_expr.bytecode().instructions.size()) + " insts";
     }
     if (state->uses_time_t) status_info += " [Animated]";
@@ -913,6 +970,7 @@ static LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
                 if (state && state->hwnd_combo_mode) {
                     int sel = static_cast<int>(SendMessageA(state->hwnd_combo_mode, CB_GETCURSEL, 0, 0));
                     state->plot_mode = static_cast<PlotMode>(sel);
+                    state->is_surface_3d = (state->plot_mode == PlotMode::Surface3D);
                     if (state->renderer) {
                         state->renderer->render(state->get_elapsed_time());
                         state->renderer->present();
@@ -928,6 +986,7 @@ static LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
                 SetWindowTextA(state->hwnd_edit, s);
                 SendMessageA(state->hwnd_combo_mode, CB_SETCURSEL, static_cast<WPARAM>(PlotMode::Auto), 0);
                 state->plot_mode = PlotMode::Auto;
+                state->is_surface_3d = false;
                 apply_syntax_highlighting(state);
                 update_expression_from_edit(state);
                 return 0;
@@ -939,6 +998,7 @@ static LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
                 SetWindowTextA(state->hwnd_edit, s);
                 SendMessageA(state->hwnd_combo_mode, CB_SETCURSEL, static_cast<WPARAM>(PlotMode::Auto), 0);
                 state->plot_mode = PlotMode::Auto;
+                state->is_surface_3d = false;
                 apply_syntax_highlighting(state);
                 update_expression_from_edit(state);
                 return 0;
@@ -950,6 +1010,7 @@ static LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
                 SetWindowTextA(state->hwnd_edit, s);
                 SendMessageA(state->hwnd_combo_mode, CB_SETCURSEL, static_cast<WPARAM>(PlotMode::Auto), 0);
                 state->plot_mode = PlotMode::Auto;
+                state->is_surface_3d = false;
                 apply_syntax_highlighting(state);
                 update_expression_from_edit(state);
                 return 0;
@@ -961,6 +1022,19 @@ static LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
                 SetWindowTextA(state->hwnd_edit, s);
                 SendMessageA(state->hwnd_combo_mode, CB_SETCURSEL, static_cast<WPARAM>(PlotMode::Implicit2D), 0);
                 state->plot_mode = PlotMode::Implicit2D;
+                state->is_surface_3d = false;
+                apply_syntax_highlighting(state);
+                update_expression_from_edit(state);
+                return 0;
+            }
+
+            if (id == IDC_BTN_PRESET5 && code == BN_CLICKED) {
+                KillTimer(hwnd, TIMER_DEBOUNCE_ID);
+                const char* s = "z = sin(sqrt(x^2 + y^2)) / sqrt(x^2 + y^2)";
+                SetWindowTextA(state->hwnd_edit, s);
+                SendMessageA(state->hwnd_combo_mode, CB_SETCURSEL, static_cast<WPARAM>(PlotMode::Surface3D), 0);
+                state->plot_mode = PlotMode::Surface3D;
+                state->is_surface_3d = true;
                 apply_syntax_highlighting(state);
                 update_expression_from_edit(state);
                 return 0;
@@ -1247,11 +1321,12 @@ int main(int argc, char* argv[]) {
     HWND lbl_mode = CreateWindowExA(0, "STATIC", "Rendering Mode:", WS_CHILD | WS_VISIBLE, 15, 271, 120, 20, hwnd_main, nullptr, hinstance, nullptr);
     SendMessageA(lbl_mode, WM_SETFONT, reinterpret_cast<WPARAM>(state->font_ui), TRUE);
 
-    state->hwnd_combo_mode = CreateWindowExA(0, "COMBOBOX", "", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST | WS_VSCROLL, 145, 268, left_w - 130, 120, hwnd_main, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_COMBO_MODE)), hinstance, nullptr);
-    SendMessageA(state->hwnd_combo_mode, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>("Auto (1D Curve / 2D Field)"));
+    state->hwnd_combo_mode = CreateWindowExA(0, "COMBOBOX", "", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST | WS_VSCROLL, 145, 268, left_w - 130, 150, hwnd_main, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_COMBO_MODE)), hinstance, nullptr);
+    SendMessageA(state->hwnd_combo_mode, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>("Auto (1D Curve / 2D Field / 3D)"));
     SendMessageA(state->hwnd_combo_mode, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>("1D Explicit Curve y = f(x)"));
     SendMessageA(state->hwnd_combo_mode, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>("2D Heatmap z = f(x, y)"));
     SendMessageA(state->hwnd_combo_mode, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>("Implicit Curve f(x, y) = 0"));
+    SendMessageA(state->hwnd_combo_mode, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>("3D Surface z = f(x, y)"));
     SendMessageA(state->hwnd_combo_mode, CB_SETCURSEL, 0, 0);
     SendMessageA(state->hwnd_combo_mode, WM_SETFONT, reinterpret_cast<WPARAM>(state->font_ui), TRUE);
 
@@ -1263,23 +1338,25 @@ int main(int argc, char* argv[]) {
     HWND btn_p2 = CreateWindowExA(0, "BUTTON", "2. Calculus (diff_step)", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 220, 320, 195, 26, hwnd_main, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_BTN_PRESET2)), hinstance, nullptr);
     HWND btn_p3 = CreateWindowExA(0, "BUTTON", "3. FFT Window (hann/wave)", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 15, 350, 195, 26, hwnd_main, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_BTN_PRESET3)), hinstance, nullptr);
     HWND btn_p4 = CreateWindowExA(0, "BUTTON", "4. Implicit Flower f=0", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 220, 350, 195, 26, hwnd_main, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_BTN_PRESET4)), hinstance, nullptr);
+    HWND btn_p5 = CreateWindowExA(0, "BUTTON", "5. 3D Sombrero z=sinc(r)", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 15, 380, left_w, 26, hwnd_main, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_BTN_PRESET5)), hinstance, nullptr);
     SendMessageA(btn_p1, WM_SETFONT, reinterpret_cast<WPARAM>(state->font_ui), TRUE);
     SendMessageA(btn_p2, WM_SETFONT, reinterpret_cast<WPARAM>(state->font_ui), TRUE);
     SendMessageA(btn_p3, WM_SETFONT, reinterpret_cast<WPARAM>(state->font_ui), TRUE);
     SendMessageA(btn_p4, WM_SETFONT, reinterpret_cast<WPARAM>(state->font_ui), TRUE);
+    SendMessageA(btn_p5, WM_SETFONT, reinterpret_cast<WPARAM>(state->font_ui), TRUE);
 
     // Status / Diagnostic text
-    state->hwnd_status = CreateWindowExA(0, "STATIC", "Status: Initializing...", WS_CHILD | WS_VISIBLE, 15, 382, left_w, 46, hwnd_main, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_STATUS_TEXT)), hinstance, nullptr);
+    state->hwnd_status = CreateWindowExA(0, "STATIC", "Status: Initializing...", WS_CHILD | WS_VISIBLE, 15, 412, left_w, 44, hwnd_main, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_STATUS_TEXT)), hinstance, nullptr);
     SendMessageA(state->hwnd_status, WM_SETFONT, reinterpret_cast<WPARAM>(state->font_ui), TRUE);
 
     // LaTeXLive Mathematical Notation Section
-    HWND lbl_latex = CreateWindowExA(0, "STATIC", "LaTeXLive Formula:", WS_CHILD | WS_VISIBLE, 15, 434, 150, 20, hwnd_main, nullptr, hinstance, nullptr);
+    HWND lbl_latex = CreateWindowExA(0, "STATIC", "LaTeXLive Formula:", WS_CHILD | WS_VISIBLE, 15, 462, 150, 20, hwnd_main, nullptr, hinstance, nullptr);
     SendMessageA(lbl_latex, WM_SETFONT, reinterpret_cast<WPARAM>(state->font_ui), TRUE);
 
-    state->hwnd_btn_copy_latex = CreateWindowExA(0, "BUTTON", "Copy LaTeX", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 170, 430, 110, 26, hwnd_main, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_BTN_COPY_LATEX)), hinstance, nullptr);
+    state->hwnd_btn_copy_latex = CreateWindowExA(0, "BUTTON", "Copy LaTeX", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 170, 458, 110, 26, hwnd_main, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_BTN_COPY_LATEX)), hinstance, nullptr);
     SendMessageA(state->hwnd_btn_copy_latex, WM_SETFONT, reinterpret_cast<WPARAM>(state->font_ui), TRUE);
 
-    state->hwnd_btn_latex_to_script = CreateWindowExA(0, "BUTTON", "LaTeX -> Script", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 285, 430, 130, 26, hwnd_main, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_BTN_LATEX_TO_SCRIPT)), hinstance, nullptr);
+    state->hwnd_btn_latex_to_script = CreateWindowExA(0, "BUTTON", "LaTeX -> Script", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 285, 458, 130, 26, hwnd_main, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_BTN_LATEX_TO_SCRIPT)), hinstance, nullptr);
     SendMessageA(state->hwnd_btn_latex_to_script, WM_SETFONT, reinterpret_cast<WPARAM>(state->font_ui), TRUE);
 
     state->hwnd_latex_edit = CreateWindowExA(
@@ -1287,7 +1364,7 @@ int main(int argc, char* argv[]) {
         "EDIT",
         "",
         WS_CHILD | WS_VISIBLE | WS_VSCROLL | ES_MULTILINE | ES_AUTOVSCROLL,
-        15, 458, left_w, 76,
+        15, 486, left_w, 72,
         hwnd_main,
         reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_EDIT_LATEX)),
         hinstance, nullptr
@@ -1296,11 +1373,10 @@ int main(int argc, char* argv[]) {
 
     // Navigation & Interaction Tip box
     std::string tips = "Viewport Controls:\n"
-                       "- Left Click + Drag: Pan coordinate viewport\n"
-                       "- Mouse Wheel: Zoom in / out at mouse cursor\n"
-                       "- Double Click: Reset viewport to [-5, 5]\n"
-                       "- Autocomplete: Type 'sin', 'diff' + Tab/Enter";
-    HWND lbl_tips = CreateWindowExA(0, "STATIC", tips.c_str(), WS_CHILD | WS_VISIBLE, 15, 542, left_w, 85, hwnd_main, nullptr, hinstance, nullptr);
+                       "- 2D: Left Drag: Pan | Wheel: Zoom | DblClk: Reset\n"
+                       "- 3D: Left Drag: Rotate (Yaw/Pitch) | Wheel: Zoom\n"
+                       "- LaTeXLive: Real-time math conversion & HUD card";
+    HWND lbl_tips = CreateWindowExA(0, "STATIC", tips.c_str(), WS_CHILD | WS_VISIBLE, 15, 564, left_w, 80, hwnd_main, nullptr, hinstance, nullptr);
     SendMessageA(lbl_tips, WM_SETFONT, reinterpret_cast<WPARAM>(state->font_ui), TRUE);
 
     // Right Canvas Viewport
@@ -1330,13 +1406,6 @@ int main(int argc, char* argv[]) {
     state->renderer->set_render_callback([s](formulaic::FrameBuffer& fb, const formulaic::Viewport& vp, double time_t) {
         fb.clear(formulaic::Color::BackgroundDark);
 
-        formulaic::GridStyle style;
-        style.show_grid = true;
-        style.show_axes = true;
-        style.show_labels = true;
-        style.background_color = formulaic::Color::BackgroundDark;
-        s->engine.render_grid(fb, vp, style);
-
         if (!s->is_valid_expr) {
             fb.draw_text(20, 30, "Syntax / Semantic Error:", formulaic::Color::NeonPink);
             fb.draw_text(20, 50, s->error_message, formulaic::Color::White);
@@ -1345,8 +1414,21 @@ int main(int argc, char* argv[]) {
 
         PlotMode mode = s->plot_mode;
         if (mode == PlotMode::Auto) {
-            bool has_y = s->current_expr.references_variable("y");
-            mode = has_y ? PlotMode::ScalarField2D : PlotMode::Explicit1D;
+            if (s->is_surface_3d) {
+                mode = PlotMode::Surface3D;
+            } else {
+                bool has_y = s->current_expr.references_variable("y");
+                mode = has_y ? PlotMode::ScalarField2D : PlotMode::Explicit1D;
+            }
+        }
+
+        if (mode != PlotMode::Surface3D) {
+            formulaic::GridStyle style;
+            style.show_grid = true;
+            style.show_axes = true;
+            style.show_labels = true;
+            style.background_color = formulaic::Color::BackgroundDark;
+            s->engine.render_grid(fb, vp, style);
         }
 
         switch (mode) {
@@ -1358,6 +1440,12 @@ int main(int argc, char* argv[]) {
                 break;
             case PlotMode::Implicit2D:
                 s->engine.plot_implicit(fb, vp, s->current_expr, formulaic::Color::NeonPink, 2.5, time_t);
+                break;
+            case PlotMode::Surface3D:
+                s->surface_3d_style.azimuth_deg = s->surface_azimuth;
+                s->surface_3d_style.elevation_deg = s->surface_elevation;
+                s->surface_3d_style.zoom = s->surface_zoom;
+                s->engine.plot_surface_3d(fb, s->current_expr, s->surface_3d_style, time_t);
                 break;
             case PlotMode::Auto:
                 break;
@@ -1493,7 +1581,20 @@ int main(int argc, char* argv[]) {
         state->renderer->render(0.0);
         state->renderer->present();
 
-        std::cout << "All split-window interactive GUI, syntax highlighting, LaTeXLive & autocomplete assertions PASSED!\n";
+        // Verification 14: Test 3D Surface Preset 5 (Sombrero wave surface: z = sin(sqrt(x^2 + y^2)) / sqrt(x^2 + y^2))
+        SendMessageA(hwnd_main, WM_COMMAND, MAKEWPARAM(IDC_BTN_PRESET5, BN_CLICKED), 0);
+        TEST_ASSERT(state->is_valid_expr, "Preset 5 (3D Sombrero surface) is valid");
+        TEST_ASSERT(state->plot_mode == PlotMode::Surface3D, "Plot mode set to Surface3D for z = ...");
+        TEST_ASSERT(state->is_surface_3d, "is_surface_3d flag active");
+        TEST_ASSERT(!state->current_latex.empty(), "LaTeX formula generated for 3D surface");
+
+        // Verification 15: Render 3D surface frame with rotation and zoom
+        state->surface_azimuth = 50.0;
+        state->surface_elevation = 35.0;
+        state->renderer->render(0.0);
+        state->renderer->present();
+
+        std::cout << "All split-window interactive GUI, syntax highlighting, LaTeXLive, 3D Surface & autocomplete assertions PASSED!\n";
     }
 
     // Cleanup Win32 resources
