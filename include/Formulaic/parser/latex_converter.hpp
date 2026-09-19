@@ -28,6 +28,9 @@ public:
         const LatexFormatOptions& options = {},
         const std::vector<std::string>& variable_names = {"x", "y", "z", "t", "r", "u", "v", "h"}
     );
+
+    // Convert standard LaTeXLive mathematical formula / script back into Formulaic script
+    [[nodiscard]] static Result<std::string> to_script(std::string_view latex_text);
 };
 
 } // namespace formulaic

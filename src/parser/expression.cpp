@@ -87,6 +87,22 @@ Result<Expression> Expression::parse_equation(
     return parse(implicit_expr, variable_names);
 }
 
+Result<Expression> Expression::parse_latex(
+    std::string_view latex_text,
+    const std::vector<std::string>& variable_names
+) {
+    auto script_res = LatexConverter::to_script(latex_text);
+    if (!script_res) {
+        return script_res.error();
+    }
+    const std::string& script = script_res.value();
+    size_t last_eq = script.find('=');
+    if (last_eq != std::string::npos && script.find("let ") == std::string::npos && script.find("var ") == std::string::npos) {
+        return parse_equation(script, variable_names);
+    }
+    return parse(script, variable_names);
+}
+
 double Expression::evaluate(std::span<const double> variables) const noexcept {
     if (program_.instructions.empty()) return 0.0;
     return BytecodeVM::evaluate(program_, variables);

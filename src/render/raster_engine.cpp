@@ -1,4 +1,5 @@
 #include <Formulaic/render/raster_engine.hpp>
+#include <Formulaic/render/latex_render_module.hpp>
 #include <algorithm>
 #include <cmath>
 #include <iomanip>
@@ -896,6 +897,49 @@ void RasterEngine::render_hover_indicator(
     std::ostringstream sy;
     sy << std::fixed << std::setprecision(3) << "Y: " << hit.world_pos.y;
     fb.draw_text(bx + 10, by + 38, sy.str(), Color::LightGray);
+}
+
+void RasterEngine::plot_latex(
+    FrameBuffer& fb,
+    const Viewport& vp,
+    std::string_view latex_text,
+    Color color,
+    double line_thickness,
+    double time_t,
+    const PipelineHooks* hooks
+) const {
+    auto expr_res = Expression::parse_latex(latex_text);
+    if (!expr_res) {
+        fb.draw_text(20, 20, "LaTeX Parse Error: " + expr_res.error().format(), Color::NeonPink);
+        return;
+    }
+    const auto& expr = expr_res.value();
+    std::string s(latex_text);
+    bool is_implicit = (s.find('=') != std::string::npos && s.find("y = ") != 0);
+    if (is_implicit) {
+        plot_implicit(fb, vp, expr, color, line_thickness, time_t, hooks);
+    } else {
+        bool has_y = expr.references_variable("y");
+        if (has_y) {
+            plot_scalar_field(fb, vp, expr, ColormapType::Viridis, -1.5, 1.5, time_t, hooks);
+        } else {
+            plot_explicit(fb, vp, expr, color, line_thickness, time_t, hooks);
+        }
+    }
+}
+
+void RasterEngine::plot_latex_card(
+    FrameBuffer& fb,
+    int x,
+    int y,
+    std::string_view latex_text,
+    Color text_color,
+    Color bg_color
+) const {
+    LatexRenderStyle style;
+    style.text_color = text_color;
+    style.background_color = bg_color;
+    LatexRenderModule::render_card(fb, x, y, latex_text, style);
 }
 
 } // namespace formulaic

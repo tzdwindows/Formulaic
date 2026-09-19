@@ -51,8 +51,9 @@ constexpr int IDC_BTN_PRESET4    = 1006;
 constexpr int IDC_STATUS_TEXT    = 1007;
 constexpr int IDC_COMBO_MODE     = 1008;
 constexpr int IDC_AC_LIST        = 1009;
-constexpr int IDC_BTN_COPY_LATEX = 1010;
-constexpr int IDC_EDIT_LATEX     = 1011;
+constexpr int IDC_BTN_COPY_LATEX       = 1010;
+constexpr int IDC_EDIT_LATEX           = 1011;
+constexpr int IDC_BTN_LATEX_TO_SCRIPT  = 1012;
 
 constexpr UINT_PTR TIMER_ANIM_ID     = 2001;
 constexpr UINT_PTR TIMER_DEBOUNCE_ID = 2002;
@@ -201,6 +202,7 @@ struct EditorWindowState {
     HWND hwnd_combo_mode{nullptr};
     HWND hwnd_latex_edit{nullptr};
     HWND hwnd_btn_copy_latex{nullptr};
+    HWND hwnd_btn_latex_to_script{nullptr};
     std::string current_latex;
 
     HWND hwnd_ac_popup{nullptr};
@@ -983,6 +985,24 @@ static LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
                 }
                 return 0;
             }
+
+            if (id == IDC_BTN_LATEX_TO_SCRIPT && code == BN_CLICKED) {
+                if (state && state->hwnd_latex_edit) {
+                    std::string latex_str = get_edit_text_exact(state->hwnd_latex_edit);
+                    auto script_res = formulaic::LatexConverter::to_script(latex_str);
+                    if (script_res) {
+                        SetWindowTextA(state->hwnd_edit, script_res.value().c_str());
+                        state->current_latex = latex_str;
+                        apply_syntax_highlighting(state);
+                        update_expression_from_edit(state);
+                        SetWindowTextA(state->hwnd_status, "Status: LaTeXLive converted to script successfully!");
+                    } else {
+                        std::string err = "LaTeX Error: " + script_res.error().format();
+                        SetWindowTextA(state->hwnd_status, err.c_str());
+                    }
+                }
+                return 0;
+            }
             break;
         }
 
@@ -1253,17 +1273,20 @@ int main(int argc, char* argv[]) {
     SendMessageA(state->hwnd_status, WM_SETFONT, reinterpret_cast<WPARAM>(state->font_ui), TRUE);
 
     // LaTeXLive Mathematical Notation Section
-    HWND lbl_latex = CreateWindowExA(0, "STATIC", "Standard LaTeXLive Formula:", WS_CHILD | WS_VISIBLE, 15, 434, 260, 20, hwnd_main, nullptr, hinstance, nullptr);
+    HWND lbl_latex = CreateWindowExA(0, "STATIC", "LaTeXLive Formula:", WS_CHILD | WS_VISIBLE, 15, 434, 150, 20, hwnd_main, nullptr, hinstance, nullptr);
     SendMessageA(lbl_latex, WM_SETFONT, reinterpret_cast<WPARAM>(state->font_ui), TRUE);
 
-    state->hwnd_btn_copy_latex = CreateWindowExA(0, "BUTTON", "Copy LaTeX", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 285, 430, 130, 26, hwnd_main, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_BTN_COPY_LATEX)), hinstance, nullptr);
+    state->hwnd_btn_copy_latex = CreateWindowExA(0, "BUTTON", "Copy LaTeX", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 170, 430, 110, 26, hwnd_main, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_BTN_COPY_LATEX)), hinstance, nullptr);
     SendMessageA(state->hwnd_btn_copy_latex, WM_SETFONT, reinterpret_cast<WPARAM>(state->font_ui), TRUE);
+
+    state->hwnd_btn_latex_to_script = CreateWindowExA(0, "BUTTON", "LaTeX -> Script", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 285, 430, 130, 26, hwnd_main, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_BTN_LATEX_TO_SCRIPT)), hinstance, nullptr);
+    SendMessageA(state->hwnd_btn_latex_to_script, WM_SETFONT, reinterpret_cast<WPARAM>(state->font_ui), TRUE);
 
     state->hwnd_latex_edit = CreateWindowExA(
         WS_EX_CLIENTEDGE,
         "EDIT",
         "",
-        WS_CHILD | WS_VISIBLE | WS_VSCROLL | ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY,
+        WS_CHILD | WS_VISIBLE | WS_VSCROLL | ES_MULTILINE | ES_AUTOVSCROLL,
         15, 458, left_w, 76,
         hwnd_main,
         reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_EDIT_LATEX)),
@@ -1340,8 +1363,13 @@ int main(int argc, char* argv[]) {
                 break;
         }
 
-        // Title watermark
-        fb.draw_text(15, 15, "Formulaic Viewport [Real-Time Active]", formulaic::Color::White);
+        // LaTeXLive visual HUD card floating on top of canvas
+        if (!s->current_latex.empty()) {
+            s->engine.plot_latex_card(fb, 20, 20, s->current_latex);
+        } else {
+            // Title watermark
+            fb.draw_text(15, 15, "Formulaic Viewport [Real-Time Active]", formulaic::Color::White);
+        }
     });
 
     // Start 60 FPS animation timer
@@ -1453,13 +1481,15 @@ int main(int argc, char* argv[]) {
         // Test programmatic copy button command
         SendMessageA(hwnd_main, WM_COMMAND, MAKEWPARAM(IDC_BTN_COPY_LATEX, BN_CLICKED), 0);
 
-        // Verification 11: Test 1/x + 1/y = 0 rational equation in editor
-        SetWindowTextA(state->hwnd_edit, "1/x + 1/y = 0");
-        apply_syntax_highlighting(state.get());
-        update_expression_from_edit(state.get());
-        TEST_ASSERT(state->current_latex.find("\\frac{1}{x} + \\frac{1}{y} = 0") != std::string::npos, "Rational equation converted to LaTeX \\frac{1}{x} + \\frac{1}{y} = 0");
+        // Verification 12: Test reverse LaTeX -> Script button (IDC_BTN_LATEX_TO_SCRIPT)
+        SetWindowTextA(state->hwnd_latex_edit, "\\frac{1}{x} + \\frac{1}{y} = 0");
+        SendMessageA(hwnd_main, WM_COMMAND, MAKEWPARAM(IDC_BTN_LATEX_TO_SCRIPT, BN_CLICKED), 0);
+        std::string script_after_latex = get_edit_text_exact(state->hwnd_edit);
+        TEST_ASSERT(!script_after_latex.empty(), "Script populated from LaTeX input");
+        TEST_ASSERT(state->is_valid_expr, "Converted LaTeX script parsed and validated");
+        TEST_ASSERT(state->plot_mode == PlotMode::Implicit2D, "Converted rational equation set to Implicit2D");
 
-        // Trigger render
+        // Verification 13: Test full canvas HUD card and plot rendering
         state->renderer->render(0.0);
         state->renderer->present();
 

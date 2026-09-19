@@ -99,6 +99,7 @@ set(FORMULAIC_PUBLIC_HEADERS
     include/Formulaic/render/frame_stream.hpp
     include/Formulaic/render/raster_engine.hpp
     include/Formulaic/render/window_renderer.hpp
+    include/Formulaic/render/latex_render_module.hpp
     include/Formulaic/hooks/hooks.hpp
     include/Formulaic/hooks/pipeline_hooks.hpp
     include/Formulaic/math/calculus.hpp
@@ -132,6 +133,7 @@ set(FORMULAIC_SOURCES
     src/render/image_export.cpp
     src/render/frame_stream.cpp
     src/render/raster_engine.cpp
+    src/render/latex_render_module.cpp
     src/render/backends/win32_window.cpp
     src/render/backends/software_window.cpp
 )

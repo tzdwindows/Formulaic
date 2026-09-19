@@ -122,6 +122,27 @@ public:
         const HitTestResult& hit,
         Color highlight_color = Color::White
     ) const;
+
+    // Plots a mathematical curve or field directly from a standard LaTeX formula
+    void plot_latex(
+        FrameBuffer& fb,
+        const Viewport& vp,
+        std::string_view latex_text,
+        Color color = Color::NeonPink,
+        double line_thickness = 2.0,
+        double time_t = 0.0,
+        const PipelineHooks* hooks = nullptr
+    ) const;
+
+    // Renders visual LaTeXLive mathematical formula banner card on framebuffer
+    void plot_latex_card(
+        FrameBuffer& fb,
+        int x,
+        int y,
+        std::string_view latex_text,
+        Color text_color = Color::White,
+        Color bg_color = Color(18, 22, 34, 230)
+    ) const;
 };
 
 } // namespace formulaic

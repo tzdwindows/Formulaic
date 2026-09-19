@@ -1,5 +1,10 @@
 #include <Formulaic/parser/expression.hpp>
 #include <Formulaic/parser/latex_converter.hpp>
+#include <Formulaic/render/framebuffer.hpp>
+#include <Formulaic/render/viewport.hpp>
+#include <Formulaic/render/raster_engine.hpp>
+#include <Formulaic/render/latex_render_module.hpp>
+#include <cmath>
 #include <iostream>
 #include <string>
 
@@ -161,6 +166,98 @@ int main() {
         TEST_ASSERT_CONTAINS(res.value(), "\\]", "Ends with \\]");
     }
 
-    std::cout << "\n>>> All LaTeXLive conversion tests PASSED successfully! <<<\n";
+    // Test 12: LatexConverter::to_script reverse translation
+    {
+        // 12a: Fractions and equation
+        auto res_frac = formulaic::LatexConverter::to_script("\\frac{1}{x} + \\frac{1}{y} = 0");
+        TEST_ASSERT(res_frac.has_value(), "to_script converted rational equation");
+        std::cout << "12a. LaTeX -> Script: " << res_frac.value() << std::endl;
+        TEST_ASSERT_CONTAINS(res_frac.value(), "1 / x + 1 / y = 0", "Fractions converted to standard division");
+
+        // 12b: Powers and trig functions
+        auto res_trig = formulaic::LatexConverter::to_script("\\sin^{2}(x) + \\cos^{2}(x) = 1");
+        TEST_ASSERT(res_trig.has_value(), "to_script converted trig powers");
+        std::cout << "12b. LaTeX -> Script: " << res_trig.value() << std::endl;
+        TEST_ASSERT_CONTAINS(res_trig.value(), "sin(x)^2", "sin power converted");
+        TEST_ASSERT_CONTAINS(res_trig.value(), "cos(x)^2", "cos power converted");
+
+        // 12c: Sqrt and Greek letters
+        auto res_sqrt = formulaic::LatexConverter::to_script("\\sqrt{x^{2} + y^{2}} + \\alpha \\cdot \\sin(\\theta)");
+        TEST_ASSERT(res_sqrt.has_value(), "to_script converted sqrt and greek letters");
+        std::cout << "12c. LaTeX -> Script: " << res_sqrt.value() << std::endl;
+        TEST_ASSERT_CONTAINS(res_sqrt.value(), "sqrt(x^2 + y^2)", "sqrt converted");
+        TEST_ASSERT_CONTAINS(res_sqrt.value(), "alpha * sin(theta)", "Greek letters converted");
+
+        // 12d: Multiline aligned block to let script
+        const std::string tex_aligned =
+            "\\begin{aligned}\n"
+            "r &= \\sqrt{x^{2} + y^{2}} \\\\\n"
+            "\\theta &= \\operatorname{atan2}(y, x) \\\\\n"
+            "\\sin(6 \\cdot \\theta) \\cdot e^{-0.35 \\cdot r}\n"
+            "\\end{aligned}";
+        auto res_aligned = formulaic::LatexConverter::to_script(tex_aligned);
+        TEST_ASSERT(res_aligned.has_value(), "to_script converted aligned block");
+        std::cout << "12d. LaTeX -> Script (aligned):\n" << res_aligned.value() << std::endl;
+        TEST_ASSERT_CONTAINS(res_aligned.value(), "let r = sqrt(x^2 + y^2);", "Aligned let statement converted");
+        TEST_ASSERT_CONTAINS(res_aligned.value(), "let theta = atan2(y, x);", "Aligned let theta converted");
+    }
+
+    // Test 13: Expression::parse_latex
+    {
+        auto expr1 = formulaic::Expression::parse_latex("\\sin(x) + \\cos(y)");
+        TEST_ASSERT(expr1.has_value(), "parse_latex compiled \\sin(x) + \\cos(y)");
+        double v1 = expr1->eval(0.0, 0.0);
+        TEST_ASSERT(std::abs(v1 - 1.0) < 1e-6, "\\sin(0) + \\cos(0) == 1");
+
+        auto expr2 = formulaic::Expression::parse_latex("\\frac{x + 1}{x - 1}");
+        TEST_ASSERT(expr2.has_value(), "parse_latex compiled \\frac{x+1}{x-1}");
+        double v2 = expr2->eval(3.0);
+        TEST_ASSERT(std::abs(v2 - 2.0) < 1e-6, "\\frac{3+1}{3-1} == 2");
+
+        auto expr3 = formulaic::Expression::parse_latex("x^{3} - 4 \\cdot x");
+        TEST_ASSERT(expr3.has_value(), "parse_latex compiled x^{3} - 4 \\cdot x");
+        double v3 = expr3->eval(2.0);
+        TEST_ASSERT(std::abs(v3 - 0.0) < 1e-6, "2^3 - 4*2 == 0");
+    }
+
+    // Test 14: LatexRenderModule compile & plot
+    {
+        auto expr_res = formulaic::LatexRenderModule::compile_latex("\\frac{1}{x} + \\frac{1}{y} = 0");
+        TEST_ASSERT(expr_res.has_value(), "LatexRenderModule::compile_latex compiled implicit formula");
+
+        formulaic::FrameBuffer fb(400, 300);
+        fb.clear(formulaic::Color::BackgroundDark);
+        formulaic::Viewport vp(400, 300, formulaic::Rect2D(-5.0, 5.0, -5.0, 5.0));
+
+        formulaic::LatexRenderModule::render_latex_plot(fb, vp, "\\frac{1}{x} + \\frac{1}{y} = 0");
+        TEST_ASSERT(fb.width() == 400 && fb.height() == 300, "FrameBuffer size valid after render_latex_plot");
+    }
+
+    // Test 15: LatexRenderModule banner card and full composite
+    {
+        formulaic::FrameBuffer fb(500, 400);
+        fb.clear(formulaic::Color::BackgroundDark);
+        formulaic::Viewport vp(500, 400, formulaic::Rect2D(-5.0, 5.0, -5.0, 5.0));
+
+        formulaic::LatexRenderStyle style;
+        style.show_card = true;
+        style.curve_color = formulaic::Color::Cyan;
+        formulaic::LatexRenderModule::render_full(fb, vp, "\\sin(x)^{2} + \\cos(y)^{2}", style);
+        TEST_ASSERT(fb.width() == 500 && fb.height() == 400, "Composite render_full completed");
+    }
+
+    // Test 16: RasterEngine LaTeX methods integration
+    {
+        formulaic::FrameBuffer fb(400, 300);
+        fb.clear(formulaic::Color::BackgroundDark);
+        formulaic::Viewport vp(400, 300, formulaic::Rect2D(-5.0, 5.0, -5.0, 5.0));
+
+        formulaic::RasterEngine engine;
+        engine.plot_latex(fb, vp, "x^{2} + y^{2} = 4");
+        engine.plot_latex_card(fb, 20, 20, "\\frac{1}{x} + \\frac{1}{y} = 0");
+        TEST_ASSERT(fb.width() == 400, "RasterEngine plot_latex & plot_latex_card passed");
+    }
+
+    std::cout << "\n>>> All LaTeXLive conversion, reverse to_script & rendering module tests PASSED successfully! <<<\n";
     return 0;
 }

@@ -27,6 +27,12 @@ public:
         const std::vector<std::string>& variable_names = {"x", "y", "t"}
     );
 
+    // Parses a standard LaTeXLive formula directly into an executable Expression
+    [[nodiscard]] static Result<Expression> parse_latex(
+        std::string_view latex_text,
+        const std::vector<std::string>& variable_names = {"x", "y", "t", "r", "u", "v", "h"}
+    );
+
     // High frequency evaluation with zero heap allocation
     [[nodiscard]] double evaluate(std::span<const double> variables) const noexcept;
 
