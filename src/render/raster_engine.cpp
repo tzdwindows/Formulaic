@@ -86,11 +86,11 @@ void RasterEngine::render_grid(
 
         // X Axis (Horizontal)
         if (origin_pt.y >= 0 && origin_pt.y < fb.height()) {
-            fb.draw_line(0, origin_pt.y, fb.width() - 1, origin_pt.y, style.axis_color, 2);
+            fb.draw_line_aa(0.0, static_cast<double>(origin_pt.y), static_cast<double>(fb.width() - 1), static_cast<double>(origin_pt.y), style.axis_color, 1.5);
         }
         // Y Axis (Vertical)
         if (origin_pt.x >= 0 && origin_pt.x < fb.width()) {
-            fb.draw_line(origin_pt.x, 0, origin_pt.x, fb.height() - 1, style.axis_color, 2);
+            fb.draw_line_aa(static_cast<double>(origin_pt.x), 0.0, static_cast<double>(origin_pt.x), static_cast<double>(fb.height() - 1), style.axis_color, 1.5);
         }
     }
 
@@ -237,7 +237,7 @@ void RasterEngine::plot_parametric(
     }
 }
 
-// Marching Squares Algorithm for Implicit Function Contours f(x, y, t) = 0
+// Marching Squares / Triangles Algorithm for Implicit Function Contours f(x, y, t) = 0
 void RasterEngine::plot_implicit(
     FrameBuffer& fb,
     const Viewport& vp,
@@ -249,83 +249,149 @@ void RasterEngine::plot_implicit(
 ) const {
     if (!expr.is_valid()) return;
 
-    // Grid step in screen pixels (3px grid with sub-pixel interpolation for high FPS smooth contours)
-    constexpr int kStep = 3;
+    // Grid step in screen pixels (2px step for high FPS, ultra-crisp contours)
+    constexpr int kStep = 2;
     const int cols = (fb.width() + kStep - 1) / kStep + 1;
     const int rows = (fb.height() + kStep - 1) / kStep + 1;
 
     std::vector<double> grid(static_cast<size_t>(cols) * rows);
     std::vector<Point2D> grid_world(static_cast<size_t>(cols) * rows);
 
-    // 1. Evaluate grid vertices
+    auto eval_safe = [&](Point2D wpt) -> double {
+        if (hooks && hooks->has_coord_transform_hook()) {
+            wpt = hooks->transform_coordinate(wpt, vp);
+        }
+        double v = expr.eval(wpt.x, wpt.y, time_t);
+        if (std::isnan(v) || std::isinf(v)) {
+            // Nudge slightly in world coords if hitting exact pole (e.g. x=0 or y=0)
+            const double eps_x = (wpt.x >= 0.0) ? 1e-7 : -1e-7;
+            const double eps_y = (wpt.y >= 0.0) ? 1e-7 : -1e-7;
+            Point2D nudged{wpt.x + eps_x, wpt.y + eps_y};
+            if (hooks && hooks->has_coord_transform_hook()) {
+                nudged = hooks->transform_coordinate(nudged, vp);
+            }
+            v = expr.eval(nudged.x, nudged.y, time_t);
+            if (std::isnan(v) || std::isinf(v)) {
+                v = (v > 0.0 || (wpt.x >= 0.0 && wpt.y >= 0.0)) ? 1e7 : -1e7;
+            }
+        }
+        if (v > 1e7) return 1e7;
+        if (v < -1e7) return -1e7;
+        return v;
+    };
+
+    // 1. Evaluate grid corners
     for (int r = 0; r < rows; ++r) {
         const double sy = r * kStep;
         for (int c = 0; c < cols; ++c) {
             const double sx = c * kStep;
             Point2D wpt = vp.screen_to_world(sx, sy);
-            if (hooks && hooks->has_coord_transform_hook()) {
-                wpt = hooks->transform_coordinate(wpt, vp);
-            }
             const size_t idx = static_cast<size_t>(r) * cols + c;
             grid_world[idx] = wpt;
-            grid[idx] = expr.eval(wpt.x, wpt.y, time_t);
+            grid[idx] = eval_safe(wpt);
         }
     }
 
-    auto check_edge = [&](double vA, double vB, const Point2D& wA, const Point2D& wB) -> std::pair<bool, double> {
-        if ((vA > 0) == (vB > 0)) return {false, 0.5};
-        const double denom = vB - vA;
-        if (std::abs(denom) < 1e-9) return {false, 0.5};
-        const double t = std::clamp(-vA / denom, 0.0, 1.0);
+    struct VertexInfo {
+        Point2D screen;
+        Point2D world;
+        double val;
+    };
 
-        // Evaluate candidate root in world coordinates
-        const double wpx = wA.x + t * (wB.x - wA.x);
-        const double wpy = wA.y + t * (wB.y - wA.y);
-        const double vp_val = expr.eval(wpx, wpy, time_t);
+    auto check_edge = [&](const VertexInfo& A, const VertexInfo& B) -> std::pair<bool, Point2D> {
+        if ((A.val > 0.0) == (B.val > 0.0)) return {false, {0.0, 0.0}};
 
-        if (std::isnan(vp_val) || std::isinf(vp_val)) {
-            return {false, t};
+        double t_low = 0.0;
+        double t_high = 1.0;
+        double v_low = A.val;
+        double v_high = B.val;
+        bool hit_singularity = false;
+
+        for (int iter = 0; iter < 12; ++iter) {
+            double t_mid = 0.5 * (t_low + t_high);
+            double px = A.world.x + t_mid * (B.world.x - A.world.x);
+            double py = A.world.y + t_mid * (B.world.y - A.world.y);
+            Point2D mid_wpt{px, py};
+            if (hooks && hooks->has_coord_transform_hook()) {
+                mid_wpt = hooks->transform_coordinate(mid_wpt, vp);
+            }
+            double vm = expr.eval(mid_wpt.x, mid_wpt.y, time_t);
+            if (std::isnan(vm) || std::isinf(vm)) {
+                hit_singularity = true;
+                break;
+            }
+            if ((vm > 0.0) == (v_low > 0.0)) {
+                t_low = t_mid;
+                v_low = vm;
+            } else {
+                t_high = t_mid;
+                v_high = vm;
+            }
+        }
+        if (hit_singularity) return {false, {0.0, 0.0}};
+
+        double t = 0.5 * (t_low + t_high);
+        Point2D root_world{
+            A.world.x + t * (B.world.x - A.world.x),
+            A.world.y + t * (B.world.y - A.world.y)
+        };
+        Point2D eval_root = root_world;
+        if (hooks && hooks->has_coord_transform_hook()) {
+            eval_root = hooks->transform_coordinate(eval_root, vp);
+        }
+        double vp_val = expr.eval(eval_root.x, eval_root.y, time_t);
+        if (std::isnan(vp_val) || std::isinf(vp_val)) return {false, {0.0, 0.0}};
+
+        // Pole check 1: Residual at bisection root
+        const double min_corner = std::min(std::abs(A.val), std::abs(B.val));
+        if (std::abs(vp_val) > 2.0 && std::abs(vp_val) >= 0.5 * min_corner) {
+            return {false, {0.0, 0.0}};
         }
 
-        // Singularity / Pole check 1:
-        // On a continuous function crossing zero, the residual at the linear interpolation root
-        // must drop significantly compared to the corner values. If |vp_val| >= min(|vA|, |vB|) and is non-trivial,
-        // it signifies a jump discontinuity / pole rather than a true zero crossing.
-        const double min_corner = std::min(std::abs(vA), std::abs(vB));
-        if (std::abs(vp_val) >= min_corner && std::abs(vp_val) > 1.0) {
-            return {false, t};
-        }
-
-        // Singularity / Pole check 2: Directional derivative vs secant slope
-        // Across an asymptotic pole (e.g. 1/x jumping from -inf to +inf), the secant is positive,
-        // but the actual derivative d/dx(1/x) = -1/x^2 is negative on both sides.
-        const double dx = wB.x - wA.x;
-        const double dy = wB.y - wA.y;
+        // Pole check 2: Directional derivative vs secant
+        const double dx = B.world.x - A.world.x;
+        const double dy = B.world.y - A.world.y;
         const double dist = std::hypot(dx, dy);
         if (dist > 1e-12) {
             const double ux = dx / dist;
             const double uy = dy / dist;
-            const double secant = (vB - vA) / dist;
+            const double secant = (B.val - A.val) / dist;
             const double eps = 1e-5;
 
-            const double pAx = wA.x + 0.1 * dx;
-            const double pAy = wA.y + 0.1 * dy;
-            const double dfA = (expr.eval(pAx + eps * ux, pAy + eps * uy, time_t) -
-                                expr.eval(pAx - eps * ux, pAy - eps * uy, time_t)) / (2.0 * eps);
+            const double pAx = A.world.x + 0.1 * dx;
+            const double pAy = A.world.y + 0.1 * dy;
+            Point2D ptA_plus{pAx + eps * ux, pAy + eps * uy};
+            Point2D ptA_minus{pAx - eps * ux, pAy - eps * uy};
+            if (hooks && hooks->has_coord_transform_hook()) {
+                ptA_plus = hooks->transform_coordinate(ptA_plus, vp);
+                ptA_minus = hooks->transform_coordinate(ptA_minus, vp);
+            }
+            const double dfA = (expr.eval(ptA_plus.x, ptA_plus.y, time_t) -
+                                expr.eval(ptA_minus.x, ptA_minus.y, time_t)) / (2.0 * eps);
 
-            const double pBx = wB.x - 0.1 * dx;
-            const double pBy = wB.y - 0.1 * dy;
-            const double dfB = (expr.eval(pBx + eps * ux, pBy + eps * uy, time_t) -
-                                expr.eval(pBx - eps * ux, pBy - eps * uy, time_t)) / (2.0 * eps);
+            const double pBx = B.world.x - 0.1 * dx;
+            const double pBy = B.world.y - 0.1 * dy;
+            Point2D ptB_plus{pBx + eps * ux, pBy + eps * uy};
+            Point2D ptB_minus{pBx - eps * ux, pBy - eps * uy};
+            if (hooks && hooks->has_coord_transform_hook()) {
+                ptB_plus = hooks->transform_coordinate(ptB_plus, vp);
+                ptB_minus = hooks->transform_coordinate(ptB_minus, vp);
+            }
+            const double dfB = (expr.eval(ptB_plus.x, ptB_plus.y, time_t) -
+                                expr.eval(ptB_minus.x, ptB_minus.y, time_t)) / (2.0 * eps);
 
             if (!std::isnan(dfA) && !std::isnan(dfB) && !std::isinf(dfA) && !std::isinf(dfB)) {
                 if ((secant * dfA < 0.0) && (secant * dfB < 0.0)) {
-                    return {false, t};
+                    return {false, {0.0, 0.0}};
                 }
             }
         }
 
-        return {true, t};
+        Point2D root_screen{
+            A.screen.x + t * (B.screen.x - A.screen.x),
+            A.screen.y + t * (B.screen.y - A.screen.y)
+        };
+        return {true, root_screen};
     };
 
     auto draw_seg = [&](Point2D p1, Point2D p2) {
@@ -340,11 +406,14 @@ void RasterEngine::plot_implicit(
         if (hooks && hooks->has_pixel_shader_hook()) {
             c = hooks->shade_pixel(mid_world.x, mid_world.y, 0.0, color, time_t);
         }
-        // Sub-pixel floating-point anti-aliased segment
         fb.draw_line_aa(p1.x, p1.y, p2.x, p2.y, c, line_thickness);
     };
 
-    // 2. Marching squares cell evaluation
+    Point2D origin_screen = vp.world_to_screen_f({0.0, 0.0});
+    bool has_x_axis = (origin_screen.y >= 0.0 && origin_screen.y < fb.height());
+    bool has_y_axis = (origin_screen.x >= 0.0 && origin_screen.x < fb.width());
+
+    // 2. Iterate each cell and process 4 triangles with Center
     for (int r = 0; r < rows - 1; ++r) {
         const double sy0 = r * kStep;
         const double sy1 = (r + 1) * kStep;
@@ -353,63 +422,102 @@ void RasterEngine::plot_implicit(
             const double sx0 = c * kStep;
             const double sx1 = (c + 1) * kStep;
 
-            const size_t idx_tl = static_cast<size_t>(r) * cols + c;
-            const size_t idx_tr = static_cast<size_t>(r) * cols + (c + 1);
-            const size_t idx_br = static_cast<size_t>(r + 1) * cols + (c + 1);
-            const size_t idx_bl = static_cast<size_t>(r + 1) * cols + c;
+            auto process_subcell = [&](double sub_sx0, double sub_sy0, double sub_sx1, double sub_sy1) {
+                const double sub_sx_mid = (sub_sx0 + sub_sx1) * 0.5;
+                const double sub_sy_mid = (sub_sy0 + sub_sy1) * 0.5;
 
-            const double v_tl = grid[idx_tl];
-            const double v_tr = grid[idx_tr];
-            const double v_br = grid[idx_br];
-            const double v_bl = grid[idx_bl];
+                Point2D w_tl = vp.screen_to_world(sub_sx0, sub_sy0);
+                Point2D w_tr = vp.screen_to_world(sub_sx1, sub_sy0);
+                Point2D w_br = vp.screen_to_world(sub_sx1, sub_sy1);
+                Point2D w_bl = vp.screen_to_world(sub_sx0, sub_sy1);
+                Point2D w_c  = vp.screen_to_world(sub_sx_mid, sub_sy_mid);
 
-            if (std::isnan(v_tl) || std::isnan(v_tr) || std::isnan(v_br) || std::isnan(v_bl)) continue;
-            if (std::isinf(v_tl) || std::isinf(v_tr) || std::isinf(v_br) || std::isinf(v_bl)) continue;
+                VertexInfo vTL{{sub_sx0, sub_sy0}, w_tl, eval_safe(w_tl)};
+                VertexInfo vTR{{sub_sx1, sub_sy0}, w_tr, eval_safe(w_tr)};
+                VertexInfo vBR{{sub_sx1, sub_sy1}, w_br, eval_safe(w_br)};
+                VertexInfo vBL{{sub_sx0, sub_sy1}, w_bl, eval_safe(w_bl)};
+                VertexInfo vC {{sub_sx_mid, sub_sy_mid}, w_c, eval_safe(w_c)};
 
-            const uint8_t mask = ((v_tl > 0) ? 8 : 0) |
-                                 ((v_tr > 0) ? 4 : 0) |
-                                 ((v_br > 0) ? 2 : 0) |
-                                 ((v_bl > 0) ? 1 : 0);
+                auto local_draw = [&](const VertexInfo& va, const VertexInfo& vb, const VertexInfo& vc) {
+                    Point2D pts[3];
+                    int count = 0;
+                    auto [ok01, p01] = check_edge(va, vb);
+                    if (ok01) pts[count++] = p01;
+                    auto [ok12, p12] = check_edge(vb, vc);
+                    if (ok12) pts[count++] = p12;
+                    auto [ok20, p20] = check_edge(vc, va);
+                    if (ok20) pts[count++] = p20;
+                    if (count == 2) {
+                        draw_seg(pts[0], pts[1]);
+                    }
+                };
 
-            if (mask == 0 || mask == 15) continue;
+                local_draw(vTL, vTR, vC);
+                local_draw(vTR, vBR, vC);
+                local_draw(vBR, vBL, vC);
+                local_draw(vBL, vTL, vC);
+            };
 
-            const auto& w_tl = grid_world[idx_tl];
-            const auto& w_tr = grid_world[idx_tr];
-            const auto& w_br = grid_world[idx_br];
-            const auto& w_bl = grid_world[idx_bl];
+            // Check if this cell is intersected by the X-axis (y = 0) or Y-axis (x = 0)
+            bool crosses_x_axis = (has_x_axis && origin_screen.y > sy0 + 0.05 && origin_screen.y < sy1 - 0.05);
+            bool crosses_y_axis = (has_y_axis && origin_screen.x > sx0 + 0.05 && origin_screen.x < sx1 - 0.05);
 
-            const auto [valid_top, t_top] = check_edge(v_tl, v_tr, w_tl, w_tr);
-            const auto [valid_right, t_right] = check_edge(v_tr, v_br, w_tr, w_br);
-            const auto [valid_bottom, t_bottom] = check_edge(v_bl, v_br, w_bl, w_br);
-            const auto [valid_left, t_left] = check_edge(v_tl, v_bl, w_tl, w_bl);
+            if (crosses_x_axis && !crosses_y_axis) {
+                // Split vertically into top (y > 0) and bottom (y < 0) along the axis
+                const double ay = origin_screen.y;
+                const double d = 0.001; // tiny subpixel offset into each half-plane
+                process_subcell(sx0, sy0, sx1, ay - d);
+                process_subcell(sx0, ay + d, sx1, sy1);
+            } else if (crosses_y_axis && !crosses_x_axis) {
+                // Split horizontally into left (x < 0) and right (x > 0) along the axis
+                const double ax = origin_screen.x;
+                const double d = 0.001;
+                process_subcell(sx0, sy0, ax - d, sy1);
+                process_subcell(ax + d, sy0, sx1, sy1);
+            } else if (crosses_x_axis && crosses_y_axis) {
+                // Cell contains the origin (0, 0): split into 4 quadrants
+                const double ax = origin_screen.x;
+                const double ay = origin_screen.y;
+                const double d = 0.001;
+                process_subcell(sx0, sy0, ax - d, ay - d);
+                process_subcell(ax + d, sy0, sx1, ay - d);
+                process_subcell(sx0, ay + d, ax - d, sy1);
+                process_subcell(ax + d, ay + d, sx1, sy1);
+            } else {
+                // Standard cell
+                const size_t idx_tl = static_cast<size_t>(r) * cols + c;
+                const size_t idx_tr = static_cast<size_t>(r) * cols + (c + 1);
+                const size_t idx_br = static_cast<size_t>(r + 1) * cols + (c + 1);
+                const size_t idx_bl = static_cast<size_t>(r + 1) * cols + c;
 
-            const Point2D pt_top{sx0 + t_top * (sx1 - sx0), sy0};
-            const Point2D pt_right{sx1, sy0 + t_right * (sy1 - sy0)};
-            const Point2D pt_bottom{sx0 + t_bottom * (sx1 - sx0), sy1};
-            const Point2D pt_left{sx0, sy0 + t_left * (sy1 - sy0)};
+                VertexInfo vTL{{sx0, sy0}, grid_world[idx_tl], grid[idx_tl]};
+                VertexInfo vTR{{sx1, sy0}, grid_world[idx_tr], grid[idx_tr]};
+                VertexInfo vBR{{sx1, sy1}, grid_world[idx_br], grid[idx_br]};
+                VertexInfo vBL{{sx0, sy1}, grid_world[idx_bl], grid[idx_bl]};
 
-            switch (mask) {
-                case 1:  if (valid_left && valid_bottom) draw_seg(pt_left, pt_bottom); break;
-                case 2:  if (valid_bottom && valid_right) draw_seg(pt_bottom, pt_right); break;
-                case 3:  if (valid_left && valid_right) draw_seg(pt_left, pt_right); break;
-                case 4:  if (valid_top && valid_right) draw_seg(pt_top, pt_right); break;
-                case 5:
-                    if (valid_left && valid_top) draw_seg(pt_left, pt_top);
-                    if (valid_bottom && valid_right) draw_seg(pt_bottom, pt_right);
-                    break;
-                case 6:  if (valid_top && valid_bottom) draw_seg(pt_top, pt_bottom); break;
-                case 7:  if (valid_left && valid_top) draw_seg(pt_left, pt_top); break;
-                case 8:  if (valid_left && valid_top) draw_seg(pt_left, pt_top); break;
-                case 9:  if (valid_top && valid_bottom) draw_seg(pt_top, pt_bottom); break;
-                case 10:
-                    if (valid_top && valid_right) draw_seg(pt_top, pt_right);
-                    if (valid_left && valid_bottom) draw_seg(pt_left, pt_bottom);
-                    break;
-                case 11: if (valid_top && valid_right) draw_seg(pt_top, pt_right); break;
-                case 12: if (valid_left && valid_right) draw_seg(pt_left, pt_right); break;
-                case 13: if (valid_bottom && valid_right) draw_seg(pt_bottom, pt_right); break;
-                case 14: if (valid_left && valid_bottom) draw_seg(pt_left, pt_bottom); break;
-                default: break;
+                const double sx_mid = (sx0 + sx1) * 0.5;
+                const double sy_mid = (sy0 + sy1) * 0.5;
+                Point2D w_mid = vp.screen_to_world(sx_mid, sy_mid);
+                VertexInfo vC{{sx_mid, sy_mid}, w_mid, eval_safe(w_mid)};
+
+                auto local_draw = [&](const VertexInfo& va, const VertexInfo& vb, const VertexInfo& vc) {
+                    Point2D pts[3];
+                    int count = 0;
+                    auto [ok01, p01] = check_edge(va, vb);
+                    if (ok01) pts[count++] = p01;
+                    auto [ok12, p12] = check_edge(vb, vc);
+                    if (ok12) pts[count++] = p12;
+                    auto [ok20, p20] = check_edge(vc, va);
+                    if (ok20) pts[count++] = p20;
+                    if (count == 2) {
+                        draw_seg(pts[0], pts[1]);
+                    }
+                };
+
+                local_draw(vTL, vTR, vC);
+                local_draw(vTR, vBR, vC);
+                local_draw(vBR, vBL, vC);
+                local_draw(vBL, vTL, vC);
             }
         }
     }

@@ -41,3 +41,4 @@ set_target_properties(test_editor_window PROPERTIES FOLDER "Tests")
 add_test(NAME test_editor_window COMMAND test_editor_window --automated)
 
 
+

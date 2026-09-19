@@ -159,6 +159,43 @@ int main() {
         std::cout << "PASSED -> Saved to " << bmp_path.string() << "\n";
     }
 
+    // 4c. Implicit 2D Zoom-Out & Near-Axis Hyperbola Resolution (1/x + 1/y = 50)
+    {
+        std::cout << "[Test 4c] Implicit Function Zoom-Out & Near-Axis Resolution (1/x + 1/y = 50)... ";
+        formulaic::FrameBuffer fb(800, 600, formulaic::Color::BackgroundDark);
+        formulaic::Viewport vp(800, 600, formulaic::Rect2D(-20.0, 20.0, -20.0, 20.0));
+        formulaic::RasterEngine engine;
+
+        formulaic::GridStyle grid;
+        grid.show_grid = true;
+        grid.show_axes = true;
+        grid.show_labels = true;
+        engine.render_grid(fb, vp, grid);
+
+        auto expr = formulaic::Expression::parse_equation("1/x + 1/y = 50");
+        TEST_ASSERT(expr.has_value(), expr.error().format());
+        engine.plot_implicit(fb, vp, expr.value(), formulaic::Color::NeonPink, 2.5);
+
+        // Check that at x = 5.0, the curve is rendered near y = 0.02 (screen y ≈ 299)
+        bool found_curve_pixel = false;
+        for (int dy = -3; dy <= 3; ++dy) {
+            for (int dx = -3; dx <= 3; ++dx) {
+                auto col = fb.get_pixel(499 + dx, 299 + dy);
+                if (col.r > 200 && col.b > 100) {
+                    found_curve_pixel = true;
+                    break;
+                }
+            }
+            if (found_curve_pixel) break;
+        }
+        TEST_ASSERT(found_curve_pixel, "Hyperbola branch y ≈ 0.02 must be rendered even when zoomed out to [-20, 20]");
+
+        auto bmp_path = output_dir / "test_zoomout_1_x_1_y_50.bmp";
+        auto res = formulaic::ImageExport::save_bmp(fb, bmp_path);
+        TEST_ASSERT(res.has_value(), res.error().format());
+        std::cout << "PASSED -> Saved to " << bmp_path.string() << "\n";
+    }
+
     // 5. Scalar Field 2D Heatmap
     {
         std::cout << "[Test 5] Scalar Field Heatmap Rasterization... ";
